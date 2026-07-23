@@ -32,6 +32,7 @@ No npm publish or registry step is involved — this GitHub repo *is* the source
 | Skill | Description |
 | ----- | ----------- |
 | [`grok-image`](skills/grok-image/) | Generate real raster images via xAI's Grok **Imagine** API using the `grok` CLI's OAuth token — no console API key, stdlib-only Python. |
+| [`open-design-grok-images`](skills/open-design-grok-images/) | Build an Open Design artifact (deck/page/prototype) with real Grok-generated images embedded — combines the Open Design MCP with `grok-image`. |
 
 ### grok-image
 
@@ -43,6 +44,13 @@ Generates images with `grok-imagine-image` / `grok-imagine-image-quality` and sa
 ```bash
 python3 <skill-dir>/grok_image.py "a minimal isometric server room, blue accent" --out ./assets/hero.jpg
 ```
+
+### open-design-grok-images
+
+Orchestrates the **Open Design MCP** + the `grok-image` skill: commission a design, generate real images with Grok Imagine, and embed them into the artifact's `assets/` instead of placeholders or hand-drawn SVG.
+
+- **Requires:** the Open Design MCP connected, plus the `grok-image` skill (install both: `npx skills add LoneExile/skills`).
+- **Why:** Open Design's built-in image generation often lacks configured model credentials; `grok-image` sidesteps that via the grok CLI's OAuth token.
 
 ## Layout
 

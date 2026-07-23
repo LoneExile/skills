@@ -1,11 +1,19 @@
 # SkillSpector baseline — findings here are reviewed, intended behaviors of the
-# grok-image skill and are suppressed on future scans. New/unexpected findings
+# skills in this repo and are suppressed on future scans. New/unexpected findings
 # are NOT suppressed and surface in scans + the GitHub Security tab.
 # Regenerate when adding skills: skillspector baseline ./skills --no-llm -o .skillspector-baseline.yaml
 # See https://github.com/NVIDIA/SkillSpector/blob/main/docs/SUPPRESSION.md
 version: 1
 rules: []
 fingerprints:
+- hash: sha256:22d12776d3f79aef
+  rule_id: RP1
+  file: open-design-grok-images/SKILL.md
+  reason: "Intended: `npx skills add ...` is the standard install command for the vercel-labs skills CLI; version-pinning does not apply to this doc example."
+- hash: sha256:340101fc3efeb7b5
+  rule_id: RP1
+  file: open-design-grok-images/SKILL.md
+  reason: "Intended: `npx skills add ...` is the standard install command for the vercel-labs skills CLI; version-pinning does not apply to this doc example."
 - hash: sha256:ca3c317dd119d3bf
   rule_id: E1
   file: grok-image/SKILL.md

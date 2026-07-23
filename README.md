@@ -33,6 +33,7 @@ No npm publish or registry step is involved — this GitHub repo *is* the source
 | ----- | ----------- |
 | [`grok-image`](skills/grok-image/) | Generate real raster images via xAI's Grok **Imagine** API using the `grok` CLI's OAuth token — no console API key, stdlib-only Python. |
 | [`open-design-grok-images`](skills/open-design-grok-images/) | Build an Open Design artifact (deck/page/prototype) with real Grok-generated images embedded — combines the Open Design MCP with `grok-image`. |
+| [`terminal-demo-video`](skills/terminal-demo-video/) | Record a real terminal session (CLI/TUI) to a looping GIF + MP4 via tmux + asciinema + agg — captures real keystrokes and Alt/Ctrl chords that VHS drops. |
 
 ### grok-image
 
@@ -52,6 +53,18 @@ Orchestrates the **Open Design MCP** + the `grok-image` skill: commission a desi
 - **Requires:** the Open Design MCP connected, plus the `grok-image` skill (install both: `npx skills add LoneExile/skills`).
 - **Why:** Open Design's built-in image generation often lacks configured model credentials; `grok-image` sidesteps that via the grok CLI's OAuth token.
 
+### terminal-demo-video
+
+Records a real terminal session to a looping **GIF** + **MP4**. A bundled `record.sh` drives the program inside **tmux** (so real keystrokes and modifier chords like **`Alt+G`** actually reach it — the ones VHS/ttyd drop), records with **asciinema**, and renders with **agg** + **ffmpeg**. Human-paced typing, readable pauses, and a clean final frame are built in.
+
+- **Requires:** `tmux`, `asciinema`, `agg`, `ffmpeg` (macOS: `brew install tmux asciinema agg ffmpeg`), plus a monospace/Nerd font for rendering.
+- **Actions** (`type` / `paste` / `key` / `sleep`) come from a file or stdin, so a demo is fully scripted and reproducible.
+
+```bash
+<skill-dir>/record.sh --cmd "omp --no-session --no-title" \
+  --out ./assets/demo --boot 16 --actions demo.actions
+```
+
 ## Layout
 
 ```
@@ -59,6 +72,9 @@ skills/
   grok-image/
     SKILL.md        # instructions + frontmatter (name, description)
     grok_image.py   # bundled helper script
+  terminal-demo-video/
+    SKILL.md        # instructions + frontmatter (name, description)
+    record.sh       # bundled recorder (tmux + asciinema + agg)
 ```
 
 Each skill is a directory under `skills/` containing a `SKILL.md`; supporting files live alongside it and are installed with the skill.

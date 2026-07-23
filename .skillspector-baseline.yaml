@@ -15,6 +15,9 @@ rules:
   - id: "RA2"
     path: "open-design-grok-images/SKILL.md"
     reason: "False positive: markdown documentation describing how to save/reference a generated image file; no cron/startup persistence mechanism."
+  - id: "MP2"
+    path: "terminal-demo-video/record.sh"
+    reason: "False positive: the match is the script's own --help/usage comment block (the option list), not user-injected content or context-window stuffing."
 
 # Exact fingerprints for stable code findings.
 fingerprints:

@@ -5,7 +5,7 @@
 [![Security: SkillSpector](https://img.shields.io/badge/security-SkillSpector-76B900?logo=nvidia&logoColor=white)](https://github.com/NVIDIA/SkillSpector)
 [![Latest release](https://img.shields.io/github/v/release/LoneExile/skills?sort=semver&display_name=tag)](https://github.com/LoneExile/skills/releases/latest)
 [![License: MIT](https://img.shields.io/github/license/LoneExile/skills)](LICENSE)
-[![skills.sh](https://skills.sh/b/LoneExile/skills)](https://skills.sh/LoneExile/skills)
+[![Install](https://img.shields.io/badge/install-npx%20skills%20add-CB3837?logo=npm&logoColor=white)](https://github.com/vercel-labs/skills)
 
 Reusable [Agent Skills](https://agentskills.io) for AI coding agents (Claude Code, Cursor, Codex, OpenCode, Pi, and [70+ more](https://github.com/vercel-labs/skills#supported-agents)).
 

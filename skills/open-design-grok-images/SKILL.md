@@ -1,6 +1,6 @@
 ---
 name: open-design-grok-images
-description: "Build an Open Design artifact (slide deck, web page, prototype) with REAL Grok-generated images embedded, by combining the Open Design MCP with the grok-image skill. Use when generating a design in Open Design that needs actual images (hero, section art) instead of placeholders or hand-drawn SVG."
+description: "Embed REAL Grok-generated images into ANY Open Design artifact — prototype, live artifact, slide deck, media, or app mockup (responsive/desktop web, iOS, Android, tablet, desktop app) — by combining the Open Design MCP with the grok-image skill. Use whenever a design made in Open Design needs actual images (hero, section art, backgrounds, app screens) instead of placeholders or hand-drawn SVG."
 ---
 
 # open-design-grok-images
@@ -11,9 +11,13 @@ Generate a design in **Open Design** (via its MCP) and embed **real raster image
 Open Design's built-in media/image generation needs image-model credentials that are often not configured on a daemon (it falls back to hand-drawn SVG or fails). The `grok-image` skill sidesteps that: it generates images from the **grok CLI's OAuth token** and writes real `.jpg`/`.png` files, which you drop into the Open Design project's `assets/` and reference from the artifact.
 
 ## When to use
-- The user asks Open Design to make a deck / page / prototype **with images**.
+Whenever a design being made in **Open Design** needs real images — regardless of the project's type or target platform:
+- Any **project type**: Prototype, Live artifact, Slide deck, From template, Media, or Other.
+- Any **target platform**: Responsive/Desktop web, iOS app, Android app, Tablet app, Desktop app.
 - An Open Design run produced placeholders or SVG stand-ins and you want real generated art.
-- You need art-directed hero/section images in an Open Design artifact.
+- You need art-directed hero/section/background/app-screen imagery in an Open Design artifact.
+
+Open Design renders every artifact as web tech — its files are HTML / JSX / CSS / JSON / SVG (an "iOS app" or "Android app" target adds device frames + interaction rules over the same HTML/JSX, not a native binary). So a generated image embeds the same way — write it into the project folder (conventionally an `assets/` subdir) and reference it with a relative path — whether the artifact is a landing page, a deck, or an app mockup.
 
 ## Prerequisites
 - The **Open Design MCP** connected (tools: `create_project`, `start_run`, `get_run`, `get_project`, `list_files`, `get_file`, `write_file`, `get_artifact`).

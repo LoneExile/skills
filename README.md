@@ -1,5 +1,12 @@
 # skills
 
+[![Validate](https://github.com/LoneExile/skills/actions/workflows/validate.yml/badge.svg)](https://github.com/LoneExile/skills/actions/workflows/validate.yml)
+[![SkillSpector](https://github.com/LoneExile/skills/actions/workflows/skillspector.yml/badge.svg)](https://github.com/LoneExile/skills/actions/workflows/skillspector.yml)
+[![Security: SkillSpector](https://img.shields.io/badge/security-SkillSpector-76B900?logo=nvidia&logoColor=white)](https://github.com/NVIDIA/SkillSpector)
+[![Latest release](https://img.shields.io/github/v/release/LoneExile/skills?sort=semver&display_name=tag)](https://github.com/LoneExile/skills/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/LoneExile/skills)](LICENSE)
+[![skills.sh](https://skills.sh/b/LoneExile/skills)](https://skills.sh/LoneExile/skills)
+
 Reusable [Agent Skills](https://agentskills.io) for AI coding agents (Claude Code, Cursor, Codex, OpenCode, Pi, and [70+ more](https://github.com/vercel-labs/skills#supported-agents)).
 
 Install any skill here with the [`skills` CLI](https://github.com/vercel-labs/skills):

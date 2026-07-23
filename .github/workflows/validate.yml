@@ -1,0 +1,41 @@
+name: Validate
+
+on:
+  push:
+    branches: [main]
+    paths: ["skills/**", ".github/workflows/validate.yml"]
+  pull_request:
+    paths: ["skills/**", ".github/workflows/validate.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Skill structure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Discover skills (validates SKILL.md frontmatter)
+        run: npx -y skills add . --list
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Byte-compile helper scripts
+        run: |
+          shopt -s nullglob globstar
+          files=(skills/**/*.py)
+          if [ ${#files[@]} -gt 0 ]; then
+            python3 -m py_compile "${files[@]}"
+            echo "Compiled ${#files[@]} script(s)."
+          else
+            echo "No Python helper scripts to check."
+          fi

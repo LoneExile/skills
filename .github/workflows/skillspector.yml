@@ -1,0 +1,53 @@
+name: SkillSpector
+
+on:
+  push:
+    branches: [main]
+    paths: ["skills/**", ".skillspector-baseline.yaml", ".github/workflows/skillspector.yml"]
+  pull_request:
+    paths: ["skills/**", ".skillspector-baseline.yaml", ".github/workflows/skillspector.yml"]
+  schedule:
+    - cron: "0 6 * * 1" # weekly, Monday 06:00 UTC (catches new OSV/pattern updates)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Static security scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload SARIF to the Security tab
+    env:
+      # SkillSpector has no release tags; pin to a reviewed commit and bump deliberately.
+      SKILLSPECTOR_REF: a54947c307fe19a24a43db55f6148e181a987a67
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Scan skills (SARIF)
+        run: |
+          uvx --from "git+https://github.com/NVIDIA/SkillSpector.git@${SKILLSPECTOR_REF}" \
+            skillspector scan ./skills \
+            --no-llm \
+            --baseline .skillspector-baseline.yaml \
+            --format sarif --output results.sarif
+
+      - name: Scan skills (terminal summary)
+        if: always()
+        run: |
+          uvx --from "git+https://github.com/NVIDIA/SkillSpector.git@${SKILLSPECTOR_REF}" \
+            skillspector scan ./skills \
+            --no-llm \
+            --baseline .skillspector-baseline.yaml
+
+      - name: Upload SARIF to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
+          category: skillspector

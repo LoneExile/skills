@@ -1,0 +1,24 @@
+# SkillSpector baseline — findings here are reviewed, intended behaviors of the
+# grok-image skill and are suppressed on future scans. New/unexpected findings
+# are NOT suppressed and surface in scans + the GitHub Security tab.
+# Regenerate when adding skills: skillspector baseline ./skills --no-llm -o .skillspector-baseline.yaml
+# See https://github.com/NVIDIA/SkillSpector/blob/main/docs/SUPPRESSION.md
+version: 1
+rules: []
+fingerprints:
+- hash: sha256:ca3c317dd119d3bf
+  rule_id: E1
+  file: grok-image/SKILL.md
+  reason: "Intended: docs mention the xAI Imagine endpoint (api.x.ai) the skill posts to — its core purpose."
+- hash: sha256:34daa15389519e67
+  rule_id: E1
+  file: grok-image/grok_image.py
+  reason: "Intended: POSTs the prompt to https://api.x.ai/v1/images/generations to generate the image (core purpose)."
+- hash: sha256:aab2df12875e3799
+  rule_id: PE3
+  file: grok-image/grok_image.py
+  reason: "Intended: reads the xAI OAuth token from the grok CLI store (~/.grok/auth.json); no secret is written or exfiltrated."
+- hash: sha256:ca0ef056bd93c2a2
+  rule_id: PE3
+  file: grok-image/grok_image.py
+  reason: "Intended: reads the xAI OAuth token from the grok CLI store (~/.grok/auth.json); no secret is written or exfiltrated."

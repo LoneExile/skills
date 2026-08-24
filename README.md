@@ -32,6 +32,7 @@ No npm publish or registry step is involved — this GitHub repo *is* the source
 | Skill | Description |
 | ----- | ----------- |
 | [`grok-image`](skills/grok-image/) | Generate real raster images via xAI's Grok **Imagine** API using the `grok` CLI's OAuth token — no console API key, stdlib-only Python. |
+| [`grok-video`](skills/grok-video/) | Generate real MP4 videos via xAI's Grok **Imagine** video API using the `grok` CLI's OAuth token — no console API key, stdlib-only Python. |
 | [`open-design-grok-images`](skills/open-design-grok-images/) | Build an Open Design artifact (deck/page/prototype) with real Grok-generated images embedded — combines the Open Design MCP with `grok-image`. |
 | [`terminal-demo-video`](skills/terminal-demo-video/) | Record a real terminal session (CLI/TUI) to a looping GIF + MP4 via tmux + asciinema + agg — captures real keystrokes and Alt/Ctrl chords that VHS drops. |
 
@@ -44,6 +45,18 @@ Generates images with `grok-imagine-image` / `grok-imagine-image-quality` and sa
 
 ```bash
 python3 <skill-dir>/grok_image.py "a minimal isometric server room, blue accent" --out ./assets/hero.jpg
+```
+
+### grok-video
+
+Generates videos with `grok-imagine-video-1.5` / `grok-imagine-video` and saves a local MP4, printing a `MEDIA:<path>` line for native delivery/embedding. Also supports **image-to-video** via `--image`.
+
+- **Requires:** the [`grok` CLI](https://github.com/superagent-ai/grok-cli) logged in (it stores an xAI OAuth token at `~/.grok/auth.json`, which the skill reads fresh each call), plus `python3`.
+- **Note:** this targets Grok's Imagine endpoint via the grok CLI's OAuth session — not an officially documented public API. It can change upstream, and video generation is **billed to the xAI account** behind that token. Generation is asynchronous (submit → poll → download).
+
+```bash
+python3 <skill-dir>/grok_video.py "A red apple rolling across a wooden table, soft light" \
+  --duration 5 --resolution 480p --out ./assets/demo.mp4
 ```
 
 ### open-design-grok-images
@@ -72,6 +85,9 @@ skills/
   grok-image/
     SKILL.md        # instructions + frontmatter (name, description)
     grok_image.py   # bundled helper script
+  grok-video/
+    SKILL.md        # instructions + frontmatter (name, description)
+    grok_video.py   # bundled helper script (async submit + poll + download)
   terminal-demo-video/
     SKILL.md        # instructions + frontmatter (name, description)
     record.sh       # bundled recorder (tmux + asciinema + agg)

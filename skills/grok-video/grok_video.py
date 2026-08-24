@@ -128,11 +128,13 @@ def generate_video(prompt, model="grok-imagine-video-1.5", duration=8,
 
     payload = {
         "model": model,
-        "prompt": prompt,
         "duration": duration,
         "aspect_ratio": aspect_ratio,
         "resolution": resolution,
     }
+    if prompt:
+        # I2V: docs mark prompt Optional -- omit the field entirely, don't send ""
+        payload["prompt"] = prompt
     if image:
         try:
             payload["image"] = {"url": _image_data_url(image)}

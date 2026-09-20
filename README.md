@@ -33,7 +33,6 @@ No npm publish or registry step is involved — this GitHub repo *is* the source
 | ----- | ----------- |
 | [`grok-image`](skills/grok-image/) | Generate real raster images via xAI's Grok **Imagine** API using the `grok` CLI's OAuth token — no console API key, stdlib-only Python. |
 | [`grok-video`](skills/grok-video/) | Generate real MP4 videos via xAI's Grok **Imagine** video API using the `grok` CLI's OAuth token — no console API key, stdlib-only Python. |
-| [`open-design-grok-images`](skills/open-design-grok-images/) | Build an Open Design artifact (deck/page/prototype) with real Grok-generated images embedded — combines the Open Design MCP with `grok-image`. |
 | [`terminal-demo-video`](skills/terminal-demo-video/) | Record a real terminal session (CLI/TUI) to a looping GIF + MP4 via tmux + asciinema + agg — captures real keystrokes and Alt/Ctrl chords that VHS drops. |
 
 ### grok-image
@@ -58,13 +57,6 @@ Generates videos with `grok-imagine-video-1.5` / `grok-imagine-video` and saves 
 python3 <skill-dir>/grok_video.py "A red apple rolling across a wooden table, soft light" \
   --duration 5 --resolution 480p --out ./assets/demo.mp4
 ```
-
-### open-design-grok-images
-
-Orchestrates the **Open Design MCP** + the `grok-image` skill: commission a design, generate real images with Grok Imagine, and embed them into the artifact's `assets/` instead of placeholders or hand-drawn SVG.
-
-- **Requires:** the Open Design MCP connected, plus the `grok-image` skill (install both: `npx skills add LoneExile/skills`).
-- **Why:** Open Design's built-in image generation often lacks configured model credentials; `grok-image` sidesteps that via the grok CLI's OAuth token.
 
 ### terminal-demo-video
 

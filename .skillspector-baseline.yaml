@@ -9,12 +9,6 @@ version: 1
 
 # Drift-tolerant glob rules (survive line/wording changes in docs).
 rules:
-  - id: "RP1"
-    path: "open-design-grok-images/SKILL.md"
-    reason: "Intended: `npx skills add ...` is the standard install command for the vercel-labs skills CLI; version-pinning does not apply to this doc example."
-  - id: "RA2"
-    path: "open-design-grok-images/SKILL.md"
-    reason: "False positive: markdown documentation describing how to save/reference a generated image file; no cron/startup persistence mechanism."
   - id: "MP2"
     path: "terminal-demo-video/record.sh"
     reason: "False positive: the match is the script's own --help/usage comment block (the option list), not user-injected content or context-window stuffing."

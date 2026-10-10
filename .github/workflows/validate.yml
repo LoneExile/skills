@@ -39,3 +39,14 @@ jobs:
           else
             echo "No Python helper scripts to check."
           fi
+
+      - name: Syntax-check JavaScript helper scripts
+        run: |
+          shopt -s nullglob globstar
+          files=(skills/**/*.mjs skills/**/*.js)
+          for f in "${files[@]}"; do node --check "$f"; done
+          if [ ${#files[@]} -gt 0 ]; then
+            echo "Checked ${#files[@]} script(s)."
+          else
+            echo "No JavaScript helper scripts to check."
+          fi

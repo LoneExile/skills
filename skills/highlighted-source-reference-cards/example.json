@@ -1,0 +1,55 @@
+{
+  "out": "./references",
+  "supportsLabel": "Supports on the diagram:",
+  "cards": [
+    {
+      "key": "ref-01-nvidia-inference-server",
+      "title": "NVIDIA-Certified Systems Configuration Guide: inference server",
+      "supports": "GPU servers: 192 GB of RAM is 2 × the card's 96 GB, and 32-48 cores is well above 6 cores for one GPU.",
+      "url": "https://docs.nvidia.com/certification-programs/latest/nvidia-certified-configuration-guide.html",
+      "highlights": [
+        { "text": "CPU Cores: minimum 6x physical CPU cores per GPU." },
+        { "text": "Minimum 2x times of total GPU memory." }
+      ],
+      "region": {
+        "top": { "text": "Inference Server System" },
+        "bottom": { "sel": "tr", "has": "System Memory" },
+        "padTop": 14,
+        "padBottom": 8
+      }
+    },
+    {
+      "key": "ref-02-ceph-minimum-hardware",
+      "title": "Ceph documentation: minimum hardware per daemon",
+      "supports": "Ceph per NVMe drive: 4 threads = 2 cores and at least 4 GiB RAM. Monitor: 2 threads = 1 core and 5 GB RAM. Ceph counts threads, not cores.",
+      "url": "https://docs.ceph.com/en/latest/start/minimum-hardware/",
+      "highlights": [
+        { "text": "Cores means threads when hyperthreading is enabled." },
+        { "within": { "sel": "tr", "has": "per NVMe SSD OSD" }, "text": "4 minimum, 6 recommended per NVMe SSD OSD" },
+        { "within": { "sel": "tr", "has": "per OSD; see" }, "text": ">= 4 GiB per OSD" },
+        { "text": "2 cores minimum" },
+        { "text": ">= 5 GB per daemon" }
+      ],
+      "region": {
+        "top": { "sel": "h1" },
+        "bottom": { "text": "Thread counts are before replication" },
+        "padTop": 12,
+        "padBottom": 30
+      }
+    },
+    {
+      "key": "ref-03-dell-r7725-two-cpus",
+      "title": "Dell PowerEdge R7725 Technical Guide (PDF): Table 31, PCIe riser configurations",
+      "supports": "GPU servers: 2 CPUs. Riser configuration 4, the one Dell lists for the RTX PRO 6000, needs 2 processors.",
+      "pdf": "https://www.delltechnologies.com/asset/en-us/products/servers/technical-support/poweredge-r7725-technical-guide.pdf",
+      "highlights": [
+        { "text": "Table 31. PCIe Riser Configurations" },
+        { "text": "No. of Processors" },
+        { "text": "4", "row": "R1b+R2a+R3e+R4a+R5" },
+        { "text": "R1b+R2a+R3e+R4a+R5", "wrap": 1 },
+        { "text": "2", "row": "R1b+R2a+R3e+R4a+R5" }
+      ],
+      "crop": { "top": 496, "bottom": "footer" }
+    }
+  ]
+}

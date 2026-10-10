@@ -31,3 +31,7 @@ fingerprints:
   rule_id: PE3
   file: grok-image/grok_image.py
   reason: "Intended: reads the xAI OAuth token from the grok CLI store (~/.grok/auth.json); no secret is written or exfiltrated."
+- hash: sha256:10ab5e05b47c3b01
+  rule_id: PE3
+  file: highlighted-source-reference-cards/refcards.mjs
+  reason: "False positive: the match is the Chrome launch flags --use-mock-keychain and --password-store=basic, which keep the throwaway headless profile away from the OS keychain. No credential is read, stored, or sent."

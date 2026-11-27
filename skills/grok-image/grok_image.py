@@ -9,18 +9,137 @@ Generate images via the xAI Imagine API using the xAI OAuth token from the
 The token is read FRESH on every invocation, so refreshes performed by the
 grok CLI are picked up automatically.
 """
+from __future__ import annotations
+
 import argparse
 import json
+import re
 import sys
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Mapping
 
 API_URL = "https://api.x.ai/v1/images/generations"
 GROK_AUTH_JSON = Path.home() / ".grok" / "auth.json"
 DEFAULT_OUT = Path.home() / "generated-images"
 IMG_EXTS = (".jpg", ".jpeg", ".png", ".webp")
+
+
+# --- key lookup (keep identical in grok_image.py and grok_video.py) ---
+LOGIN_LABEL = "grok CLI login (~/.grok/auth.json)"
+
+
+class KeyMissingError(Exception):
+    """No usable xAI credential; the message lists each source and why it missed."""
+
+
+def read_dotenv_value(path: Path, name: str) -> str | None:
+    """Value of `NAME=...` in a dotenv file; None if absent or empty.
+
+    As in OMP, the last matching line wins. A BOM is dropped, and an
+    undecodable byte becomes U+FFFD instead of hiding the whole file.
+    """
+    pattern = re.compile(r"^\s*(?:export\s+)?" + re.escape(name) + r"\s*=\s*(.*)$")
+    value = None
+    for line in path.read_text(encoding="utf-8-sig", errors="replace").splitlines():
+        m = pattern.match(line)
+        if m:
+            value = m.group(1).strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+                value = value[1:-1]
+    return value or None
+
+
+def _login_entries(path: Path, now: datetime, min_valid_seconds: float):
+    """(entries, reason): entries are (key, written, kind) in file order.
+
+    kind is "long", "short" or "expired"; reason says why there are none.
+    """
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return [], "file missing"
+    except (OSError, ValueError) as e:
+        return [], f"unreadable ({type(e).__name__})"
+    values = data.values() if isinstance(data, dict) else []
+    entries = []
+    for entry in values:
+        key = entry.get("key") if isinstance(entry, dict) else None
+        if not isinstance(key, str) or not key:
+            continue
+        written = entry.get("expires_at")
+        stamp = written
+        if isinstance(written, str) and written.endswith("Z"):
+            stamp = written[:-1] + "+00:00"  # fromisoformat reads Z only from Python 3.11
+        try:
+            expires = datetime.fromisoformat(stamp)
+        except (TypeError, ValueError):
+            entries.append((key, written, "long"))  # missing or unparseable counts as usable
+            continue
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        if expires > now + timedelta(seconds=min_valid_seconds):
+            kind = "long"
+        elif expires > now:
+            kind = "short"
+        else:
+            kind = "expired"
+        entries.append((key, written, kind))
+    return entries, "no login entry"
+
+
+def resolve_key(env: Mapping[str, str], home: Path, now: datetime,
+                min_valid_seconds: float) -> tuple[str, str, str | None]:
+    """(key, label, note) for the first usable credential; KeyMissingError if none."""
+    entries, login_reason = _login_entries(
+        Path(home) / ".grok" / "auth.json", now, min_valid_seconds)
+    for key, _, kind in entries:
+        if kind == "long":
+            return key, LOGIN_LABEL, None
+    short = next(((k, w) for k, w, kind in entries if kind == "short"), None)
+    expired = next((w for _, w, kind in entries if kind == "expired"), None)
+    if expired is not None:
+        login_reason = f"expired at {expired}"
+
+    def passed_over(label: str) -> str | None:
+        if short is None:
+            return None
+        return (f"Note: the grok CLI login expires at {short[1]}, too soon for this run; "
+                f"using {label}.")
+
+    for name in ("XAI_API_KEY", "GROK_API_KEY"):
+        value = env.get(name)
+        if value:
+            label = f"{name} (environment)"
+            return value, label, passed_over(label)
+    dotenv_reason = "no XAI_API_KEY or GROK_API_KEY line"
+    dotenv = Path(home) / ".omp" / ".env"
+    for name in ("XAI_API_KEY", "GROK_API_KEY"):
+        try:
+            value = read_dotenv_value(dotenv, name)
+        except FileNotFoundError:
+            dotenv_reason = "file missing"
+            break
+        except (OSError, ValueError) as e:
+            dotenv_reason = f"unreadable ({type(e).__name__})"
+            break
+        if value:
+            label = f"~/.omp/.env ({name})"
+            return value, label, passed_over(label)
+    if short is not None:
+        return short[0], LOGIN_LABEL, (
+            f"Note: the grok CLI login expires at {short[1]}, before this run may end; "
+            "no API key found, so using it anyway.")
+    raise KeyMissingError(
+        "no xAI key found. Checked:\n"
+        f"  - {LOGIN_LABEL}: {login_reason}\n"
+        "  - XAI_API_KEY (environment): unset\n"
+        "  - GROK_API_KEY (environment): unset\n"
+        f"  - ~/.omp/.env: {dotenv_reason}\n"
+        "Run `grok` to log in, set XAI_API_KEY, or add it to ~/.omp/.env.")
+# --- end key lookup ---
 
 
 def _expired(iso):

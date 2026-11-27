@@ -144,12 +144,25 @@ class CliTests(unittest.TestCase):
         self.assertEqual(a.read_bytes(), first)
 
     def test_no_cache_forces_request(self):
-        a = str(self.out / "a.wav")
-        self.run_cli(["Hi there", "-o", a], [tts_ok()])
+        a = self.out / "a.wav"
+        self.run_cli(["Hi there", "-o", str(a)], [tts_ok()])
+        old = a.read_bytes()
+        entry = self.cache / "grok-tts" / (
+            grok_tts.cache_key("Hi there", "eve", "en", 1.0, False, "wav") + ".wav")
+        self.assertEqual(entry.read_bytes(), old)
+        # The API now answers differently: --no-cache must ask again and leave the
+        # new audio in the cache entry.
         code, out, e, reqs = self.run_cli(
-            ["Hi there", "-o", a, "--no-cache"], [tts_ok()])
+            ["Hi there", "-o", str(a), "--no-cache"], [tts_ok("Hi there", seconds=0.7)])
         self.assertEqual((code, len(reqs)), (0, 1), e)
         self.assertNotIn("(cached)", out)
+        new = a.read_bytes()
+        self.assertNotEqual(new, old)
+        self.assertEqual(entry.read_bytes(), new)
+        a.unlink()
+        code, out, e, reqs = self.run_cli(["Hi there", "-o", str(a)])
+        self.assertEqual((code, reqs), (0, []), e)
+        self.assertEqual(a.read_bytes(), new)
 
     def test_cache_key_changes_with_voice_speed_format(self):
         def k(**kw):
@@ -159,7 +172,7 @@ class CliTests(unittest.TestCase):
             return grok_tts.cache_key(**args)
         base = k()
         for change in ({"voice": "ara"}, {"speed": 1.2}, {"fmt": "mp3"},
-                       {"normalize": True}, {"text": "Hi!"}):
+                       {"normalize": True}, {"text": "Hi!"}, {"lang": "fr"}):
             self.assertNotEqual(base, k(**change), change)
         self.assertEqual(base, k(voice="Eve"))
         self.assertEqual(base, k(lang="EN"))

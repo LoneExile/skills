@@ -74,6 +74,12 @@ class KeyLookupTests(unittest.TestCase):
         self.assertEqual(self.resolve(home),
                          ("g1", "~/.omp/.env (GROK_API_KEY)", None))
 
+    def test_dotenv_export_and_double_quotes(self):
+        home = self.home()
+        write_dotenv(home, 'XAI_API_KEY=x0\nexport XAI_API_KEY="x1"\n')
+        self.assertEqual(self.resolve(home),
+                         ("x1", "~/.omp/.env (XAI_API_KEY)", None))
+
     def test_key_source_precedence(self):
         home = self.home()
         write_dotenv(home, "XAI_API_KEY=k-dot-x\nGROK_API_KEY=k-dot-g\n")
@@ -126,6 +132,16 @@ class KeyLookupTests(unittest.TestCase):
              f"Note: the grok CLI login expires at {iso(100)}, before this run may end; "
              "no API key found, so using it anyway."))
 
+    def test_short_login_note_when_a_dotenv_key_is_used(self):
+        home = self.home()
+        write_login(home, [("k-login", iso(100))])
+        write_dotenv(home, "XAI_API_KEY=k-dot\n")
+        self.assertEqual(
+            self.resolve(home),
+            ("k-dot", "~/.omp/.env (XAI_API_KEY)",
+             f"Note: the grok CLI login expires at {iso(100)}, too soon for this run; "
+             "using ~/.omp/.env (XAI_API_KEY)."))
+
     def test_first_counting_entry_wins(self):
         home = self.home()
         write_login(home, [("k-exp", iso(-5)), ("k-a", iso(3600)), ("k-b", iso(7200))])
@@ -136,6 +152,12 @@ class KeyLookupTests(unittest.TestCase):
         write_login(home, [("k-none", None), ("k-a", iso(3600))])
         key, _, note = self.resolve(home)
         self.assertEqual((key, note), ("k-none", None))
+
+    def test_garbage_expiry_is_usable(self):
+        home = self.home()
+        write_login(home, [("k-login", "not-a-date")])
+        self.assertEqual(self.resolve(home, {"XAI_API_KEY": "k-env"}),
+                         ("k-login", LOGIN, None))
 
     def test_z_and_naive_times(self):
         for stamp in ("2026-11-27T13:00:00Z", "2026-11-27T13:00:00"):
@@ -153,6 +175,22 @@ class KeyLookupTests(unittest.TestCase):
         (home / ".grok" / "auth.json").write_text("{not json", encoding="utf-8")
         self.assertIn("grok CLI login (~/.grok/auth.json): unreadable (JSONDecodeError)",
                       self.missing(home))
+
+    def test_unreadable_dotenv_is_reported(self):
+        home = self.home()
+        (home / ".omp" / ".env").mkdir(parents=True)
+        self.assertIn("~/.omp/.env: unreadable (IsADirectoryError)", self.missing(home))
+
+    def test_login_file_without_an_entry(self):
+        for text in ('{"a": "x", "b": {"key": 5}}', "[]"):
+            with self.subTest(text):
+                home = self.home()
+                (home / ".grok").mkdir()
+                (home / ".grok" / "auth.json").write_text(text, encoding="utf-8")
+                self.assertEqual(self.resolve(home, {"XAI_API_KEY": "k-env"}),
+                                 ("k-env", "XAI_API_KEY (environment)", None))
+                self.assertIn("grok CLI login (~/.grok/auth.json): no login entry",
+                              self.missing(home))
 
     def test_project_dotenv_ignored(self):
         proj = self.home()

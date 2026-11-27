@@ -7,15 +7,22 @@ Stdlib-only (urllib) -- no `requests` and no third-party packages.
 
 This module has no side effects at import time: no network, no file access.
 """
+import base64
+import binascii
 import json
 import math
 import os
+import random
 import re
 import shutil
 import struct
 import subprocess
 import tempfile
+import time
+import urllib.error
+import urllib.request
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -304,3 +311,190 @@ def resolve_key(env: Mapping[str, str], home: Path, now: datetime) -> tuple[str,
     lines = ["no xAI key found. Checked:"] + [f"  - {lbl}: {why}" for lbl, why in misses]
     lines.append("Set XAI_API_KEY, add it to ~/.omp/.env, or run `grok` to log in.")
     raise KeyMissingError("\n".join(lines))
+
+
+API_BASE = "https://api.x.ai"
+_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+_BACKOFF = (2, 4, 8)
+
+
+class ApiError(GrokTTSError):
+    """The API or the network failed; `status` is the HTTP status, if any."""
+
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
+
+
+@dataclass(frozen=True)
+class Synthesis:
+    audio: bytes
+    words: list
+    duration: float
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Never follow redirects: the Authorization header must stay on one host."""
+
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def _usable_header_value(key: str) -> bool:
+    try:
+        key.encode("latin-1")
+    except UnicodeEncodeError:
+        return False
+    return "\r" not in key and "\n" not in key
+
+
+def _error_text(raw: bytes, key: str) -> str:
+    text = raw.decode("utf-8", errors="replace")
+    try:
+        data = json.loads(text)
+    except ValueError:
+        data = None
+    found = None
+    if isinstance(data, dict):
+        for field in ("error", "code"):
+            if isinstance(data.get(field), str) and data[field]:
+                found = data[field]
+                break
+    if found is None:
+        found = text[:200]
+    if key:
+        found = found.replace(key, "[redacted]")
+    return found
+
+
+def _retry_wait(attempt: int, retry_after, rand) -> float:
+    if retry_after is not None:
+        try:
+            wait = float(retry_after)
+        except ValueError:
+            wait = None
+        if wait is not None and math.isfinite(wait) and wait >= 0:
+            return min(wait, 60.0)
+    return _BACKOFF[attempt] + rand()
+
+
+def request_json(method: str, path: str, *, key: str, source: str,
+                 body: dict | None, api_base: str, timeout: float,
+                 sleep=time.sleep, rand=random.random) -> dict:
+    """Send one API request with retries; return the decoded JSON object.
+
+    The key goes only into the Authorization header. No message, note or
+    chained exception carries it.
+    """
+    if not _usable_header_value(key):
+        raise ApiError(f"the key from {source} is not a valid header value") from None
+    data = None if body is None else json.dumps(body).encode("utf-8")
+    opener = urllib.request.build_opener(_NoRedirect)
+    url = api_base.rstrip("/") + path
+    attempts = len(_BACKOFF) + 1
+    for attempt in range(attempts):
+        headers = {"Authorization": f"Bearer {key}", "Accept": "application/json"}
+        if data is not None:
+            headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(url, data=data, headers=headers, method=method)
+        status = None
+        raw = b""
+        retry_after = None
+        reason = None
+        bad_header = False
+        try:
+            with opener.open(req, timeout=timeout) as resp:
+                status = resp.status
+                raw = resp.read()
+        except urllib.error.HTTPError as e:
+            status = e.code
+            retry_after = e.headers.get("Retry-After") if e.headers else None
+            try:
+                raw = e.read()
+            except (OSError, ValueError):
+                raw = b""
+        except (ValueError, UnicodeError):
+            bad_header = True
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            reason = getattr(e, "reason", None) or e
+            reason = str(reason).replace(key, "[redacted]") if key else str(reason)
+        if bad_header:
+            # Raised outside the except block so no exception is chained to it.
+            raise ApiError(f"the key from {source} is not a valid header value") from None
+        if status is None:
+            if attempt < attempts - 1:
+                sleep(_retry_wait(attempt, None, rand))
+                continue
+            raise ApiError(f"could not reach {api_base} after {attempts} attempts: {reason}")
+        if 200 <= status < 300:
+            try:
+                parsed = json.loads(raw.decode("utf-8"))
+            except ValueError:
+                parsed = None
+            if not isinstance(parsed, dict):
+                raise ApiError("unexpected response shape: not a JSON object", status)
+            return parsed
+        message = _error_text(raw, key)
+        if status in _RETRY_STATUSES:
+            if attempt < attempts - 1:
+                sleep(_retry_wait(attempt, retry_after, rand))
+                continue
+            raise ApiError(
+                f"xAI API error {status} after {attempts} attempts: {message}", status)
+        if status in (401, 403) or (status == 400 and "api key" in message.lower()):
+            raise ApiError(f"the key from {source} was rejected: {message}", status)
+        if status == 404 and "voice" in message.lower():
+            raise ApiError(
+                f"xAI API error {status}: {message}; run --list to see voices", status)
+        raise ApiError(f"xAI API error {status}: {message}", status)
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def synthesize(text: str, *, voice: str, lang: str, speed: float, normalize: bool,
+               fmt: str, key: str, source: str, api_base: str = API_BASE,
+               timeout: float = 300, ffprobe: str | None = None,
+               sleep=time.sleep, rand=random.random) -> Synthesis:
+    """Turn text into audio plus word timings."""
+    if fmt == "mp3":
+        output = {"codec": "mp3", "sample_rate": 44100, "bit_rate": 192000}
+    else:
+        output = {"codec": "wav", "sample_rate": 44100}
+    body = {
+        "text": text, "voice_id": voice, "language": lang, "speed": speed,
+        "with_timestamps": True, "output_format": output,
+    }
+    if normalize:
+        body["text_normalization"] = True
+    resp = request_json("POST", "/v1/tts", key=key, source=source, body=body,
+                        api_base=api_base, timeout=timeout, sleep=sleep, rand=rand)
+    stamps = resp.get("audio_timestamps")
+    chars = stamps.get("graph_chars") if isinstance(stamps, dict) else None
+    times = stamps.get("graph_times") if isinstance(stamps, dict) else None
+    duration = resp.get("duration")
+    if (not isinstance(resp.get("audio"), str) or not _number(duration)
+            or not isinstance(chars, list) or not isinstance(times, list)):
+        raise ApiError("unexpected response shape: missing audio, duration or timestamps")
+    try:
+        audio = base64.b64decode(resp["audio"], validate=True)
+    except (binascii.Error, ValueError):
+        raise ApiError("unexpected response shape: audio is not valid base64") from None
+    if fmt == "mp3":
+        check_mp3(audio, duration, ffprobe)
+    else:
+        audio = repair_wav(audio, duration)
+    return Synthesis(audio=audio, words=build_words(chars, times), duration=float(duration))
+
+
+def list_voices(*, key: str, source: str, api_base: str = API_BASE,
+                timeout: float = 300, sleep=time.sleep, rand=random.random) -> list:
+    """The voices the API offers."""
+    resp = request_json("GET", "/v1/tts/voices", key=key, source=source, body=None,
+                        api_base=api_base, timeout=timeout, sleep=sleep, rand=rand)
+    voices = resp.get("voices")
+    if not isinstance(voices, list):
+        raise ApiError("unexpected response shape: no voices list")
+    return voices

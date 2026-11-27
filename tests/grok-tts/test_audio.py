@@ -53,3 +53,24 @@ class AtomicWriteTest(unittest.TestCase):
                 grok_tts.atomic_write_many([(self.a, b"new-a"), (self.b, b"new-b")])
         self.assertEqual(self.a.read_bytes(), b"old-a")
         self.assertEqual(list(self.dir.glob("*.part")), [])
+    def failing_second_rename(self):
+        real = os.replace
+        def fake(src, dst):
+            if Path(dst) == self.b:
+                raise OSError("boom")
+            real(src, dst)
+        return mock.patch.object(grok_tts.os, "replace", side_effect=fake)
+    def test_second_rename_failure_restores_old_files(self):
+        with self.failing_second_rename():
+            with self.assertRaises(OSError):
+                grok_tts.atomic_write_many([(self.a, b"new-a"), (self.b, b"new-b")])
+        self.assertEqual(self.a.read_bytes(), b"old-a")
+        self.assertEqual(self.b.read_bytes(), b"old-b")
+        self.assertEqual(list(self.dir.glob("*.part")) + list(self.dir.glob("*.bak")), [])
+    def test_second_rename_failure_fresh_destinations_leaves_nothing(self):
+        self.a.unlink(); self.b.unlink()
+        with self.failing_second_rename():
+            with self.assertRaises(OSError):
+                grok_tts.atomic_write_many([(self.a, b"new-a"), (self.b, b"new-b")])
+        self.assertFalse(self.a.exists()); self.assertFalse(self.b.exists())
+        self.assertEqual(list(self.dir.glob("*.part")) + list(self.dir.glob("*.bak")), [])

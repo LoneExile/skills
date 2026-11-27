@@ -7,6 +7,7 @@ Stdlib-only (urllib) -- no `requests` and no third-party packages.
 
 This module has no side effects at import time: no network, no file access.
 """
+import json
 import math
 import os
 import re
@@ -14,6 +15,8 @@ import shutil
 import struct
 import subprocess
 import tempfile
+from collections.abc import Mapping
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -222,3 +225,82 @@ def atomic_write_many(items: list) -> None:
         raise
     for bak in baks:
         bak.unlink(missing_ok=True)
+
+
+class KeyMissingError(GrokTTSError):
+    """No usable xAI key; the message lists each source and why it missed."""
+
+
+def read_dotenv_value(path: Path, name: str) -> str | None:
+    """Value of `NAME=...` in a dotenv file; None if absent or empty."""
+    pattern = re.compile(r"^\s*(?:export\s+)?" + re.escape(name) + r"\s*=\s*(.*)$")
+    value = None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        m = pattern.match(line)
+        if m:
+            value = m.group(1).strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+                value = value[1:-1]
+            break
+    return value or None
+
+
+def _grok_login_key(path: Path, now: datetime) -> tuple[str | None, str]:
+    """(key, reason): key is set on a hit, otherwise reason says why not."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None, "file missing"
+    except (OSError, ValueError) as e:
+        return None, f"unreadable ({type(e).__name__})"
+    entries = [e for e in data.values() if isinstance(e, dict)] if isinstance(data, dict) else []
+    expired = []
+    for entry in entries:
+        key = entry.get("key")
+        if not isinstance(key, str) or not key:
+            continue
+        written = entry.get("expires_at")
+        try:
+            expires = datetime.fromisoformat(written)
+        except (TypeError, ValueError):
+            return key, ""  # missing or unparseable expiry counts as usable
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        if expires > now:
+            return key, ""
+        expired.append(written)
+    if expired:
+        return None, f"expired at {expired[0]}"
+    return None, "no login entry"
+
+
+def resolve_key(env: Mapping[str, str], home: Path, now: datetime) -> tuple[str, str]:
+    """Find the xAI key; the first source holding one wins. Returns (key, source label)."""
+    misses = []
+    for name in ("XAI_API_KEY", "GROK_API_KEY"):
+        label = f"{name} (environment)"
+        if env.get(name):
+            return env[name], label
+        misses.append((label, "unset"))
+
+    omp_env = home / ".omp" / ".env"
+    try:
+        for name in ("XAI_API_KEY", "GROK_API_KEY"):
+            value = read_dotenv_value(omp_env, name)
+            if value:
+                return value, f"~/.omp/.env ({name})"
+        misses.append(("~/.omp/.env", "no XAI_API_KEY or GROK_API_KEY line"))
+    except FileNotFoundError:
+        misses.append(("~/.omp/.env", "file missing"))
+    except (OSError, ValueError) as e:
+        misses.append(("~/.omp/.env", f"unreadable ({type(e).__name__})"))
+
+    label = "grok CLI login (~/.grok/auth.json)"
+    key, reason = _grok_login_key(home / ".grok" / "auth.json", now)
+    if key:
+        return key, label
+    misses.append((label, reason))
+
+    lines = ["no xAI key found. Checked:"] + [f"  - {lbl}: {why}" for lbl, why in misses]
+    lines.append("Set XAI_API_KEY, add it to ~/.omp/.env, or run `grok` to log in.")
+    raise KeyMissingError("\n".join(lines))

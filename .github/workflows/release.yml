@@ -35,7 +35,7 @@ jobs:
           TAG="${{ steps.tag.outputs.name }}"
           mkdir -p dist
           # full bundle
-          zip -r "dist/skills-${TAG}.zip" skills LICENSE README.md
+          zip -r "dist/skills-${TAG}.zip" skills LICENSE README.md assets
           # per-skill bundles
           for d in skills/*/; do
             name="$(basename "$d")"

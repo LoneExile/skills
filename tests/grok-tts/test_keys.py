@@ -56,3 +56,31 @@ class KeysTest(unittest.TestCase):
                 self.resolve()
         finally:
             os.chdir(old)
+
+    def omp_env_bytes(self, raw):
+        (self.home / ".omp").mkdir(exist_ok=True); (self.home / ".omp/.env").write_bytes(raw)
+    def test_omp_env_last_line_wins(self):
+        self.omp_env("XAI_API_KEY=k-old\nXAI_API_KEY=k-new\n")
+        self.assertEqual(self.resolve(), ("k-new", "~/.omp/.env (XAI_API_KEY)"))
+        self.omp_env("XAI_API_KEY=\nXAI_API_KEY=k-real\n")
+        self.assertEqual(self.resolve(), ("k-real", "~/.omp/.env (XAI_API_KEY)"))
+    def test_omp_env_empty_last_line_means_empty(self):
+        self.omp_env("XAI_API_KEY=k-old\nXAI_API_KEY=\nGROK_API_KEY=k-grok\n")
+        self.assertEqual(self.resolve(), ("k-grok", "~/.omp/.env (GROK_API_KEY)"))
+    def test_omp_env_bom_and_stray_bytes_are_harmless(self):
+        self.omp_env_bytes(b"\xef\xbb\xbfXAI_API_KEY=k-bom\n")
+        self.assertEqual(self.resolve(), ("k-bom", "~/.omp/.env (XAI_API_KEY)"))
+        self.omp_env_bytes(b"# caf\x92\nXAI_API_KEY=k-stray\n")
+        self.assertEqual(self.resolve(), ("k-stray", "~/.omp/.env (XAI_API_KEY)"))
+    def test_omp_env_damaged_key_is_not_skipped(self):
+        self.omp_env_bytes(b"XAI_API_KEY=k-\x92real\n")
+        key, label = self.resolve()
+        self.assertEqual(label, "~/.omp/.env (XAI_API_KEY)")
+        self.assertFalse(grok_tts._usable_header_value(key))
+    def test_unopenable_omp_env_is_a_listed_miss(self):
+        (self.home / ".omp/.env").mkdir(parents=True)  # a folder cannot be opened as a file
+        with self.assertRaises(grok_tts.KeyMissingError) as cm:
+            self.resolve()
+        self.assertIn("~/.omp/.env: unreadable (", str(cm.exception))
+        self.grok_login("k5", "2026-12-01T00:00:00Z")
+        self.assertEqual(self.resolve(), ("k5", "grok CLI login (~/.grok/auth.json)"))

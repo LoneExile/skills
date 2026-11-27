@@ -260,16 +260,19 @@ class KeyMissingError(GrokTTSError):
 
 
 def read_dotenv_value(path: Path, name: str) -> str | None:
-    """Value of `NAME=...` in a dotenv file; None if absent or empty."""
+    """Value of `NAME=...` in a dotenv file; None if absent or empty.
+
+    As in OMP, the last matching line wins. A BOM is dropped, and an
+    undecodable byte becomes U+FFFD instead of hiding the whole file.
+    """
     pattern = re.compile(r"^\s*(?:export\s+)?" + re.escape(name) + r"\s*=\s*(.*)$")
     value = None
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8-sig", errors="replace").splitlines():
         m = pattern.match(line)
         if m:
             value = m.group(1).strip()
             if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
                 value = value[1:-1]
-            break
     return value or None
 
 
@@ -323,7 +326,7 @@ def resolve_key(env: Mapping[str, str], home: Path, now: datetime) -> tuple[str,
         misses.append(("~/.omp/.env", "no XAI_API_KEY or GROK_API_KEY line"))
     except FileNotFoundError:
         misses.append(("~/.omp/.env", "file missing"))
-    except (OSError, ValueError) as e:
+    except OSError as e:
         misses.append(("~/.omp/.env", f"unreadable ({type(e).__name__})"))
 
     label = "grok CLI login (~/.grok/auth.json)"
@@ -335,6 +338,20 @@ def resolve_key(env: Mapping[str, str], home: Path, now: datetime) -> tuple[str,
     lines = ["no xAI key found. Checked:"] + [f"  - {lbl}: {why}" for lbl, why in misses]
     lines.append("Set XAI_API_KEY, add it to ~/.omp/.env, or run `grok` to log in.")
     raise KeyMissingError("\n".join(lines))
+
+
+def _key_provider(env: Mapping[str, str], home: Path, now: datetime) -> Callable[[], tuple]:
+    """A key lookup that runs once per run and names the source on stderr."""
+    found = []
+
+    def provider():
+        if not found:
+            key, source = resolve_key(env, home, now)
+            print(f"Key: {source}", file=sys.stderr)
+            found.append((key, source))
+        return found[0]
+
+    return provider
 
 
 API_BASE = "https://api.x.ai"
@@ -648,11 +665,17 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _read_text(arg: str) -> str:
+    """The text itself, or the contents of the UTF-8 file it names."""
     try:
         is_file = Path(arg).is_file()
     except OSError:  # e.g. text too long to be a file name
         return arg
-    return Path(arg).read_text(encoding="utf-8-sig") if is_file else arg
+    if not is_file:
+        return arg
+    try:
+        return Path(arg).read_text(encoding="utf-8-sig")
+    except (UnicodeDecodeError, OSError):
+        raise UsageError(f"{arg} is not readable UTF-8 text; save it as UTF-8") from None
 
 
 def _load_script(script: Path) -> list:
@@ -751,7 +774,7 @@ def run_batch(script: Path, out_dir: Path, project: Path, *, voice: str,
 
 
 def _run(args, *, api_base, env, home, now, sleep, rand) -> int:
-    key_provider = lambda: resolve_key(env, home, now)  # noqa: E731
+    key_provider = _key_provider(env, home, now)
     if args.list:
         if any([args.text, args.out, args.words, args.lines]):
             raise UsageError("--list cannot be combined with text, -o, --words or --lines")

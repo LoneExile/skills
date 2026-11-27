@@ -64,7 +64,7 @@ class BatchTests(unittest.TestCase):
         ])
         self.assertIn(f"Lines saved to: {(vo / 'lines.json').resolve()}", out)
         self.assertIn(f"intro: {(vo / 'intro.wav').resolve()}", out)
-        self.assertEqual(e, "")
+        self.assertEqual(e, "Key: XAI_API_KEY (environment)\n")
         self.assertNotIn(KEY, out + e)
 
     def test_batch_ids_validated(self):
@@ -194,6 +194,16 @@ class BatchTests(unittest.TestCase):
             [{"id": longest, "text": "Say longest"}], [tts_ok("Say longest")])
         self.assertEqual((code, len(reqs)), (0, 1), e)
         self.assertTrue((self.proj / "voiceover" / f"{longest}.wav").is_file())
+
+    def test_script_with_a_bom_runs(self):
+        path = self.root / "bom.json"
+        path.write_text(json.dumps(TWO), encoding="utf-8-sig")
+        code, _, e, reqs = self.run_cli(
+            ["--lines", str(path), "--project", str(self.proj)],
+            [tts_ok("Hi there"), tts_ok("Bye now")])
+        self.assertEqual((code, len(reqs)), (0, 2), e)
+        self.assertEqual(len(json.loads(
+            (self.proj / "voiceover" / "lines.json").read_text("utf-8"))), 2)
 
 
 if __name__ == "__main__":

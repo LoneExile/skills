@@ -56,6 +56,31 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0, e)
         self.assertEqual(reqs[0][3]["text"], "Hello file")
 
+    def test_text_file_not_utf8_is_a_usage_error(self):
+        t = self.out / "t.txt"
+        t.write_bytes("it\u2019s fine".encode("cp1252"))  # the apostrophe is byte 0x92
+        code, _, e, reqs = self.run_cli(
+            [str(t), "-o", str(self.out / "a.wav")], [tts_ok("x")])
+        self.assertEqual((code, reqs), (2, []))
+        self.assertIn(f"ERROR: {t} is not readable UTF-8 text; save it as UTF-8", e)
+        self.assertNotIn("Traceback", e)
+
+    def test_unreadable_text_file_is_a_usage_error(self):
+        t = self.out / "t.txt"
+        t.write_text("Hi")
+        t.chmod(0)
+        self.addCleanup(t.chmod, 0o600)
+        try:
+            t.read_bytes()
+        except OSError:
+            pass
+        else:
+            self.skipTest("this account ignores file permissions (root?)")
+        code, _, e, reqs = self.run_cli(
+            [str(t), "-o", str(self.out / "a.wav")], [tts_ok("Hi")])
+        self.assertEqual((code, reqs), (2, []))
+        self.assertIn("is not readable UTF-8 text", e)
+
     def test_dash_text_after_separator(self):
         code, _, e, reqs = self.run_cli(
             ["-o", str(self.out / "a.wav"), "--", "--and then"],

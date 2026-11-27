@@ -27,7 +27,9 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: |
+            3.9
+            3.12
 
       - name: Byte-compile helper scripts
         run: |
@@ -46,6 +48,13 @@ jobs:
           dirs=(tests/*/)
           for d in "${dirs[@]}"; do python3 -m unittest discover -s "$d" -t "$d" -v; done
           echo "Ran tests in ${#dirs[@]} folder(s)."
+
+      - name: Run helper-script tests on Python 3.9
+        run: |
+          shopt -s nullglob
+          dirs=(tests/*/)
+          for d in "${dirs[@]}"; do python3.9 -m unittest discover -s "$d" -t "$d" -v; done
+          echo "Ran tests in ${#dirs[@]} folder(s) on Python 3.9."
 
       - name: Syntax-check JavaScript helper scripts
         run: |

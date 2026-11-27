@@ -2,7 +2,7 @@ import json
 import socket
 import unittest
 
-from helpers import StubServer, err, grok_tts, tts_ok
+from helpers import StubServer, err, grok_tts, tts_edit, tts_ok
 
 KEY = "test-key-zz"
 SRC = "GROK_API_KEY (environment)"
@@ -209,6 +209,41 @@ class ApiTests(unittest.TestCase):
                 call(srv)
         self.assertEqual(cm.exception.status, 302)
         self.assertEqual(len(srv.requests), 1)
+
+    def test_unusable_duration_is_an_api_error(self):
+        for bad in (float("nan"), float("inf"), 0, -1):
+            with self.subTest(duration=bad):
+                response = tts_edit(tts_ok(), lambda env: env.update(duration=bad))
+                with StubServer([response]) as srv:
+                    with self.assertRaises(grok_tts.ApiError) as cm:
+                        call(srv)
+                self.assertIn("unexpected response shape: duration", str(cm.exception))
+
+    def test_no_words_is_an_api_error(self):
+        response = tts_edit(tts_ok(), lambda env: env.update(
+            audio_timestamps={"graph_chars": [], "graph_times": []}))
+        with StubServer([response]) as srv:
+            with self.assertRaises(grok_tts.ApiError) as cm:
+                call(srv)
+        self.assertIn("no word timings", str(cm.exception))
+
+    def test_malformed_timestamps_raise_a_plain_api_error(self):
+        response = tts_edit(tts_ok("Hi"), lambda env: env["audio_timestamps"].update(
+            graph_times=[["a", "b"], ["c", "d"]]))
+        with StubServer([response]) as srv:
+            with self.assertRaises(grok_tts.ApiError) as cm:
+                call(srv)
+        exc = cm.exception
+        self.assertEqual(str(exc), "unexpected response shape: timestamps")
+        self.assertIsNone(exc.__cause__)
+        self.assertIsNone(exc.__context__)
+
+    def test_unusable_timestamps_stay_timing_errors(self):
+        response = tts_edit(tts_ok("Hi"), lambda env: env["audio_timestamps"].update(
+            graph_times=[[0, 1]]))
+        with StubServer([response]) as srv:
+            with self.assertRaises(grok_tts.TimingError):
+                call(srv)
 
 
 if __name__ == "__main__":

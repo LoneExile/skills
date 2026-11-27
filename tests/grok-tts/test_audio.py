@@ -23,6 +23,9 @@ class RepairWavTest(unittest.TestCase):
     def test_not_riff_raises(self):
         with self.assertRaises(grok_tts.AudioError):
             grok_tts.repair_wav(b"ID3\x04" + bytes(100), 0.5)
+    def test_nan_expected_duration_fails_closed(self):
+        with self.assertRaises(grok_tts.AudioError):
+            grok_tts.repair_wav(streaming_wav(0.5), float("nan"))
 
 class CheckMp3Test(unittest.TestCase):
     def fake_ffprobe(self, seconds):
@@ -38,6 +41,9 @@ class CheckMp3Test(unittest.TestCase):
         grok_tts.check_mp3(b"\xff\xfb\x90" + bytes(10), 2.87, self.fake_ffprobe(2.899583))
         with self.assertRaises(grok_tts.AudioError):
             grok_tts.check_mp3(b"\xff\xfb\x90" + bytes(10), 2.87, self.fake_ffprobe(2.0))
+    def test_nan_expected_duration_fails_closed(self):
+        with self.assertRaises(grok_tts.AudioError):
+            grok_tts.check_mp3(b"\xff\xfb\x90" + bytes(10), float("nan"), self.fake_ffprobe(2.0))
 
 class AtomicWriteTest(unittest.TestCase):
     def setUp(self):

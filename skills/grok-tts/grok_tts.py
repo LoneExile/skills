@@ -148,7 +148,7 @@ def repair_wav(data: bytes, expected_duration: float) -> bytes:
     if len(audio) % 2:
         audio = audio[:-1]
     actual = len(audio) / (rate * channels * (bits / 8))
-    if abs(actual - expected_duration) > 0.05:
+    if not abs(actual - expected_duration) <= 0.05:  # NaN fails the check, never passes it
         raise AudioError(
             f"audio is {actual:g} s but the timestamps say {expected_duration:g} s"
         )
@@ -178,7 +178,7 @@ def check_mp3(data: bytes, expected_duration: float, ffprobe: str | None) -> Non
             actual = float(res.stdout.strip())
         except (OSError, subprocess.SubprocessError, ValueError) as exc:
             raise AudioError(f"could not read MP3 duration with ffprobe: {exc}") from exc
-    if abs(actual - expected_duration) > 0.1:
+    if not abs(actual - expected_duration) <= 0.1:  # NaN fails the check, never passes it
         raise AudioError(
             f"audio is {actual:.2f} s but the timestamps say {expected_duration:.2f} s"
         )
@@ -500,6 +500,14 @@ def _number(value) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
+def _positive_finite(value) -> bool:
+    try:
+        number = float(value)
+    except OverflowError:  # an integer too large for a float
+        return False
+    return math.isfinite(number) and number > 0
+
+
 def synthesize(text: str, *, voice: str, lang: str, speed: float, normalize: bool,
                fmt: str, key: str, source: str, api_base: str = API_BASE,
                timeout: float = 300, ffprobe: str | None = None,
@@ -524,6 +532,10 @@ def synthesize(text: str, *, voice: str, lang: str, speed: float, normalize: boo
     if (not isinstance(resp.get("audio"), str) or not _number(duration)
             or not isinstance(chars, list) or not isinstance(times, list)):
         raise ApiError("unexpected response shape: missing audio, duration or timestamps")
+    if not _positive_finite(duration):
+        raise ApiError(
+            f"unexpected response shape: duration {str(duration)[:30]} "
+            "is not a finite number above 0")
     try:
         audio = base64.b64decode(resp["audio"], validate=True)
     except (binascii.Error, ValueError):
@@ -532,7 +544,15 @@ def synthesize(text: str, *, voice: str, lang: str, speed: float, normalize: boo
         check_mp3(audio, duration, ffprobe)
     else:
         audio = repair_wav(audio, duration)
-    return Synthesis(audio=audio, words=build_words(chars, times), duration=float(duration))
+    try:
+        words = build_words(chars, times)
+    except (TypeError, ValueError, OverflowError):
+        words = None  # raised below, outside the except block, so nothing is chained
+    if words is None:
+        raise ApiError("unexpected response shape: timestamps") from None
+    if not words:
+        raise ApiError("unexpected response shape: no word timings")
+    return Synthesis(audio=audio, words=words, duration=float(duration))
 
 
 def list_voices(*, key: str, source: str, api_base: str = API_BASE,
@@ -541,8 +561,8 @@ def list_voices(*, key: str, source: str, api_base: str = API_BASE,
     resp = request_json("GET", "/v1/tts/voices", key=key, source=source, body=None,
                         api_base=api_base, timeout=timeout, sleep=sleep, rand=rand)
     voices = resp.get("voices")
-    if not isinstance(voices, list):
-        raise ApiError("unexpected response shape: no voices list")
+    if not isinstance(voices, list) or not all(isinstance(v, dict) for v in voices):
+        raise ApiError("unexpected response shape: voices is not a list of objects")
     return voices
 
 
@@ -566,7 +586,7 @@ def validate_request(text: str, lang: str, speed: float) -> str | None:
         raise UsageError("text has only speech tags and nothing to say")
     if not 0.7 <= speed <= 1.5:
         raise UsageError(f"speed {speed} is out of range; use 0.7 to 1.5")
-    if lang.lower() != "auto" and not _LANG_RE.match(lang):
+    if lang.lower() != "auto" and not _LANG_RE.fullmatch(lang):
         raise UsageError(
             f"language {lang!r} is not a language code; use auto or a code like en or pt-BR")
     if lang.lower() not in DOCUMENTED_LANGS:
@@ -774,6 +794,8 @@ def run_batch(script: Path, out_dir: Path, project: Path, *, voice: str,
 
 
 def _run(args, *, api_base, env, home, now, sleep, rand) -> int:
+    if not (math.isfinite(args.timeout) and args.timeout > 0):
+        raise UsageError(f"--timeout must be a number of seconds above 0, not {args.timeout:g}")
     key_provider = _key_provider(env, home, now)
     if args.list:
         if any([args.text, args.out, args.words, args.lines]):

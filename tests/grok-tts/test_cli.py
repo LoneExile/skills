@@ -9,7 +9,7 @@ import wave
 from pathlib import Path
 from unittest import mock
 
-from helpers import StubServer, err, grok_tts, lock_dir, tts_ok
+from helpers import StubServer, err, grok_tts, lock_dir, tts_edit, tts_ok
 
 KEY = "test-key-zz"
 
@@ -276,6 +276,70 @@ class CliTests(unittest.TestCase):
                 self.assertEqual((code, reqs), (2, []), e)
                 self.assertIn("same file", e)
         self.assertFalse((self.out / "sub").exists())
+
+    def assert_response_rejected(self, response, message, text="Hi there"):
+        """The API sends `response`: exit 1 with an ERROR line, no files, no cache entry."""
+        a = self.out / "a.wav"
+        code, _, e, reqs = self.run_cli([text, "-o", str(a)], [response])
+        self.assertEqual((code, len(reqs)), (1, 1), e)
+        self.assertIn(f"ERROR: {message}", e)
+        self.assertNotIn("Traceback", e)
+        self.assertFalse(a.exists())
+        self.assertFalse((self.cache / "grok-tts").exists())
+
+    def test_nan_duration_is_an_api_error(self):
+        response = tts_edit(tts_ok(), lambda env: env.update(duration=float("nan")))
+        self.assert_response_rejected(response, "unexpected response shape: duration")
+
+    def test_empty_word_list_is_an_api_error(self):
+        response = tts_edit(tts_ok(), lambda env: env.update(
+            audio_timestamps={"graph_chars": [], "graph_times": []}))
+        self.assert_response_rejected(response, "unexpected response shape: no word timings")
+
+    def test_malformed_timestamps_are_api_errors(self):
+        def stamps(**change):
+            return lambda env: env["audio_timestamps"].update(change)
+
+        cases = {
+            "non-numeric times": stamps(graph_times=[["a", "b"], ["c", "d"]]),
+            "times that are not pairs": stamps(graph_times=[5, 6]),
+            "characters that are not text": stamps(graph_chars=[1, 2]),
+            "a time too large for a float": stamps(graph_times=[[0, 10 ** 400], [0, 1]]),
+        }
+        for name, edit in cases.items():
+            with self.subTest(case=name):
+                self.assert_response_rejected(
+                    tts_edit(tts_ok("Hi"), edit),
+                    "unexpected response shape: timestamps", text="Hi")
+
+    def test_list_with_a_voice_that_is_not_an_object(self):
+        body = json.dumps({"voices": ["x"]}).encode()
+        code, _, e, reqs = self.run_cli(["--list"], [(200, {}, body)])
+        self.assertEqual((code, len(reqs)), (1, 1), e)
+        self.assertIn("ERROR: unexpected response shape", e)
+        self.assertNotIn("Traceback", e)
+
+    def test_timeout_must_be_a_positive_number(self):
+        script = self.out / "s.json"
+        script.write_text(json.dumps([{"id": "a", "text": "Hi"}]))
+        keyless = {"XDG_CACHE_HOME": str(self.cache)}  # a key lookup would exit 1, not 2
+        modes = {"single": ["Hi", "-o", str(self.out / "a.wav")],
+                 "batch": ["--lines", str(script), "--project", str(self.out)],
+                 "list": ["--list"]}
+        for bad in ("0", "-1", "nan", "inf"):
+            for mode, argv in modes.items():
+                with self.subTest(timeout=bad, mode=mode):
+                    code, _, e, reqs = self.run_cli([*argv, "--timeout", bad], env=keyless)
+                    self.assertEqual((code, reqs), (2, []), e)
+                    self.assertIn("--timeout", e)
+        code, _, e, reqs = self.run_cli(
+            ["Hi", "-o", str(self.out / "a.wav"), "--timeout", "5"], [tts_ok("Hi")])
+        self.assertEqual((code, len(reqs)), (0, 1), e)
+
+    def test_lang_with_a_trailing_newline_is_refused(self):
+        code, _, e, reqs = self.run_cli(
+            ["Hi", "-o", str(self.out / "a.wav"), "--lang", "en\n"], [tts_ok("Hi")])
+        self.assertEqual((code, reqs), (2, []), e)
 
 
 if __name__ == "__main__":

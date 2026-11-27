@@ -35,27 +35,27 @@ fingerprints:
   rule_id: PE3
   file: highlighted-source-reference-cards/refcards.mjs
   reason: "False positive: the match is the Chrome launch flags --use-mock-keychain and --password-store=basic, which keep the throwaway headless profile away from the OS keychain. No credential is read, stored, or sent."
-- hash: sha256:b697b496dd000e86
+- hash: sha256:d3bd039cbd48fa1c
   rule_id: PE3
   file: grok-tts/grok_tts.py
   reason: "Intended: reads the xAI key from ~/.omp/.env or the grok CLI login store (~/.grok/auth.json); the key is sent only to api.x.ai and is never printed, logged or written."
-- hash: sha256:f6fe95b79130b0f1
+- hash: sha256:ace51fe10bbd2b6a
   rule_id: PE3
   file: grok-tts/grok_tts.py
   reason: "Intended: reads the xAI key from ~/.omp/.env or the grok CLI login store (~/.grok/auth.json); the key is sent only to api.x.ai and is never printed, logged or written."
-- hash: sha256:fdb0fb4532553404
+- hash: sha256:6cc25703fb3b71f6
   rule_id: PE3
   file: grok-tts/grok_tts.py
   reason: "Intended: reads the xAI key from ~/.omp/.env or the grok CLI login store (~/.grok/auth.json); the key is sent only to api.x.ai and is never printed, logged or written."
-- hash: sha256:df1d8d6288615485
+- hash: sha256:f050de567e718c3f
   rule_id: PE3
   file: grok-tts/grok_tts.py
   reason: "Intended: reads the xAI key from ~/.omp/.env or the grok CLI login store (~/.grok/auth.json); the key is sent only to api.x.ai and is never printed, logged or written."
-- hash: sha256:cbf2dd0be6e4030b
+- hash: sha256:f3e9caf897f7f17b
   rule_id: PE3
   file: grok-tts/grok_tts.py
   reason: "Intended: reads the xAI key from ~/.omp/.env or the grok CLI login store (~/.grok/auth.json); the key is sent only to api.x.ai and is never printed, logged or written."
-- hash: sha256:7bea1b81d5970618
+- hash: sha256:fd604cabdf1ee228
   rule_id: AST4
   file: grok-tts/grok_tts.py
   reason: "Intended: the optional ffprobe MP3 duration check in check_mp3. Argv list, no shell, run only on a temp copy of the audio the API returned."

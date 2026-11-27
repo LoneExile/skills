@@ -9,7 +9,7 @@ import wave
 from pathlib import Path
 from unittest import mock
 
-from helpers import StubServer, err, grok_tts, tts_ok
+from helpers import StubServer, err, grok_tts, lock_dir, tts_ok
 
 KEY = "test-key-zz"
 
@@ -18,6 +18,7 @@ class CliTests(unittest.TestCase):
     def setUp(self):
         root = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, root, True)
+        self.root = root
         self.home = root / "home"
         self.out = root / "out"
         self.cache = root / "cache"
@@ -192,6 +193,64 @@ class CliTests(unittest.TestCase):
                    if p != a and p.read_bytes() == b"old-a"]
         self.assertTrue(holders)
         self.assertTrue(any(str(p) in e for p in holders), e)
+
+    def test_unwritable_cache_only_warns(self):
+        locked_home = self.root / "locked-home"
+        locked_folder = self.root / "locked-folder"
+        locked_home.mkdir()
+        (locked_folder / "grok-tts").mkdir(parents=True)
+        lock_dir(self, locked_home)
+        lock_dir(self, locked_folder / "grok-tts")
+        a, j = self.out / "a.wav", self.out / "a.json"
+        for home in (locked_home, locked_folder):
+            with self.subTest(cache_home=home.name):
+                env = {"XAI_API_KEY": KEY, "XDG_CACHE_HOME": str(home)}
+                code, out, e, reqs = self.run_cli(
+                    ["Hi there", "-o", str(a), "--words", str(j)], [tts_ok()], env=env)
+                self.assertEqual((code, len(reqs)), (0, 1), e)
+                self.assertTrue(a.is_file() and j.is_file())
+                self.assertIn("WARNING: cache not updated (", e)
+                self.assertNotIn(KEY, out + e)
+                a.unlink()
+                j.unlink()
+
+    def test_output_failure_after_a_paid_request_keeps_the_cache_entry(self):
+        a = self.out / "a.wav"
+        a.mkdir()  # a folder where the file should go: the write fails after the request
+        code, _, e, reqs = self.run_cli(["Hi there", "-o", str(a)], [tts_ok()])
+        self.assertEqual((code, len(reqs)), (1, 1), e)
+        a.rmdir()
+        code, out, e, reqs = self.run_cli(["Hi there", "-o", str(a)])
+        self.assertEqual((code, len(reqs)), (0, 0), e)
+        self.assertIn("(cached)", out)
+        self.assertTrue(a.is_file())
+
+    def test_single_mode_creates_missing_folders(self):
+        a = self.out / "new" / "deeper" / "a.wav"
+        j = self.out / "other" / "a.json"
+        code, _, e, reqs = self.run_cli(
+            ["Hi there", "-o", str(a), "--words", str(j)], [tts_ok()])
+        self.assertEqual((code, len(reqs)), (0, 1), e)
+        self.assertTrue(a.is_file())
+        self.assertTrue(j.is_file())
+
+    def test_unusable_output_folder_fails_before_any_request(self):
+        blocker = self.out / "blocker"
+        blocker.write_text("not a folder")
+        code, _, e, reqs = self.run_cli(
+            ["Hi there", "-o", str(blocker / "sub" / "a.wav")], [tts_ok()])
+        self.assertEqual((code, reqs), (1, []))
+        self.assertIn("ERROR:", e)
+
+    def test_audio_and_words_cannot_be_the_same_file(self):
+        a = self.out / "a.wav"
+        for words in (a, self.out / "A.WAV", self.out / "sub" / ".." / "a.wav"):
+            with self.subTest(words=str(words)):
+                code, _, e, reqs = self.run_cli(
+                    ["Hi", "-o", str(a), "--words", str(words)], [tts_ok("Hi")])
+                self.assertEqual((code, reqs), (2, []), e)
+                self.assertIn("same file", e)
+        self.assertFalse((self.out / "sub").exists())
 
 
 if __name__ == "__main__":

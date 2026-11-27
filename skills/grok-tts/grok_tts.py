@@ -576,6 +576,15 @@ def _words_json(words: list) -> bytes:
     return json.dumps(words, indent=1, ensure_ascii=False).encode("utf-8")
 
 
+def _write_cache(cache_dir: Path, entries: list) -> None:
+    """Best effort: a cache that cannot be written never fails a run that has its audio."""
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        atomic_write_many(entries)
+    except OSError as exc:
+        print(f"WARNING: cache not updated ({exc})", file=sys.stderr)
+
+
 def produce(text: str, dest: Path, words_dest: Path | None, *, voice: str,
             lang: str, speed: float, normalize: bool, cache_dir: Path,
             use_cache: bool, key_provider: Callable[[], tuple],
@@ -605,12 +614,12 @@ def produce(text: str, dest: Path, words_dest: Path | None, *, voice: str,
                         api_base=api_base, timeout=timeout, ffprobe=ffprobe,
                         sleep=sleep, rand=rand)
     words_raw = _words_json(result.words)
+    # The cache goes first, so a paid result survives a failed output write.
+    _write_cache(cache_dir, [(audio_cache, result.audio), (words_cache, words_raw)])
     items = [(dest, result.audio)]
     if words_dest is not None:
         items.append((words_dest, words_raw))
     atomic_write_many(items)
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    atomic_write_many([(audio_cache, result.audio), (words_cache, words_raw)])
     return result.words, False
 
 
@@ -663,12 +672,23 @@ def _load_script(script: Path) -> list:
     return data
 
 
+def _same_file(a: Path, b: Path) -> bool:
+    """Whether two paths name one file or folder; case is ignored, as some folders ignore it."""
+    return str(a.resolve()).casefold() == str(b.resolve()).casefold()
+
+
+MAX_ID_BYTES = 200
+
+
 def _check_line_id(line_id: str) -> None:
-    if (not line_id or line_id in (".", "..")
-            or any(c in line_id for c in "/\\:")):
+    plain = (line_id and line_id not in (".", "..")
+             and not any(c in line_id for c in "/\\:")
+             and not any(unicodedata.category(c) in ("Cc", "Cs") for c in line_id)
+             and len(line_id.encode("utf-8")) <= MAX_ID_BYTES)
+    if not plain:
         raise UsageError(
-            f"line id {line_id!r} is not a plain file name "
-            "(not empty, not . or .., no / \\ or :)")
+            f"line id {line_id!r} is not a plain file name (not empty, not . or .., "
+            f"no / \\ or :, no control characters, at most {MAX_ID_BYTES} bytes)")
 
 
 def run_batch(script: Path, out_dir: Path, project: Path, *, voice: str,
@@ -704,7 +724,13 @@ def run_batch(script: Path, out_dir: Path, project: Path, *, voice: str,
     except ValueError:
         raise UsageError(
             f"--out-dir {out_dir} is outside the project folder {project}") from None
+    if _same_file(out_abs, project_abs / "assets" / "voice"):
+        raise UsageError(
+            f"--out-dir {out_dir} is where media-use writes its own copies of the voice "
+            "files, and it drops the lines whose takes live there; use the default voiceover/")
     out_abs.mkdir(parents=True, exist_ok=True)
+    # A lines.json on disk always comes from a run in which every line succeeded.
+    (out_abs / "lines.json").unlink(missing_ok=True)
     lines = []
     for item, text in zip(data, texts):
         line_id = item["id"]
@@ -756,6 +782,11 @@ def _run(args, *, api_base, env, home, now, sleep, rand) -> int:
     if warning:
         print(f"WARNING: {warning}", file=sys.stderr)
     words_dest = Path(args.words) if args.words else None
+    if words_dest is not None and _same_file(dest, words_dest):
+        raise UsageError("-o and --words name the same file")
+    for target in (dest, words_dest):
+        if target is not None:
+            target.parent.mkdir(parents=True, exist_ok=True)
     _, cached = produce(
         text, dest, words_dest, voice=args.voice, lang=args.lang,
         speed=args.speed, normalize=args.normalize,

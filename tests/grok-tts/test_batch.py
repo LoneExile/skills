@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path, PurePosixPath
 
-from helpers import StubServer, err, grok_tts, tts_ok
+from helpers import StubServer, err, grok_tts, lock_dir, tts_ok
 
 KEY = "test-key-zz"
 TWO = [{"id": "intro", "text": "Hi there"}, {"id": "outro", "text": "Bye now"}]
@@ -138,6 +138,62 @@ class BatchTests(unittest.TestCase):
                 self.assertIsInstance(w["text"], str)
                 self.assertTrue(math.isfinite(w["start"]) and math.isfinite(w["end"]))
                 self.assertLessEqual(w["start"], w["end"])
+
+    def test_batch_unwritable_cache_only_warns(self):
+        lock_dir(self, self.cache)
+        code, out, e, reqs = self.batch(
+            TWO, [tts_ok("Hi there"), tts_ok("Bye now")])
+        self.assertEqual((code, len(reqs)), (0, 2), e)
+        self.assertTrue((self.proj / "voiceover" / "lines.json").is_file())
+        self.assertEqual(e.count("WARNING: cache not updated ("), 2)
+        self.assertNotIn(KEY, out + e)
+
+    def test_failed_rerun_leaves_no_stale_lines_json(self):
+        vo = self.proj / "voiceover"
+        code, _, e, _ = self.batch(TWO, [tts_ok("Hi there"), tts_ok("Bye now")])
+        self.assertEqual(code, 0, e)
+        self.assertTrue((vo / "lines.json").exists())
+        edited = [TWO[0], {"id": "outro", "text": "Bye later"}]
+        code, _, _, reqs = self.batch(edited, [err("empty_text")])
+        self.assertEqual((code, len(reqs)), (1, 1))
+        self.assertFalse((vo / "lines.json").exists())
+        code, _, e, _ = self.batch(edited, [tts_ok("Bye later")])
+        self.assertEqual(code, 0, e)
+        lines = json.loads((vo / "lines.json").read_text("utf-8"))
+        self.assertEqual([line["id"] for line in lines], ["intro", "outro"])
+        self.assertEqual(lines[1]["words"][-1]["text"], "later")
+
+    def test_batch_refuses_the_media_use_voice_folder(self):
+        for name in ("assets/voice", "Assets/Voice", "assets/voice/",
+                     str(self.proj / "assets" / "voice")):
+            with self.subTest(out_dir=name):
+                code, _, e, reqs = self.batch(TWO, extra=["--out-dir", name])
+                self.assertEqual((code, len(reqs)), (2, 0), e)
+                self.assertIn("media-use", e)
+                self.assertIn("voiceover/", e)
+        self.assertFalse((self.proj / "assets").exists())
+        code, _, e, reqs = self.batch(
+            TWO, [tts_ok("Hi there"), tts_ok("Bye now")],
+            extra=["--out-dir", "assets/voice/takes"])
+        self.assertEqual((code, len(reqs)), (0, 2), e)
+        self.assertTrue((self.proj / "assets" / "voice" / "takes" / "intro.wav").is_file())
+
+    def test_batch_id_control_characters_and_length(self):
+        bad = {"nul": "a\x00b", "newline": "a\nb", "tab": "a\tb", "delete": "a\x7fb",
+               "201 bytes": "a" * 201, "202 bytes": "\u00e9" * 101,
+               "lone surrogate": "a\ud800b"}
+        for name, line_id in bad.items():
+            with self.subTest(case=name):
+                text = f"Say {name}"  # a text of its own: a cache hit cannot hide a request
+                code, _, e, reqs = self.batch(
+                    [{"id": line_id, "text": text}], [tts_ok(text)])
+                self.assertEqual((code, len(reqs)), (2, 0), e)
+                self.assertNotIn("Traceback", e)
+        longest = "a" * 200
+        code, _, e, reqs = self.batch(
+            [{"id": longest, "text": "Say longest"}], [tts_ok("Say longest")])
+        self.assertEqual((code, len(reqs)), (0, 1), e)
+        self.assertTrue((self.proj / "voiceover" / f"{longest}.wav").is_file())
 
 
 if __name__ == "__main__":

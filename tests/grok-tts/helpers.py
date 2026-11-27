@@ -1,6 +1,7 @@
 """Test helpers: make skills/grok-tts importable and load fixtures."""
 import struct
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -104,3 +105,24 @@ def tts_ok(text: str = "Hi there", seconds: float = 0.5, fmt: str = "wav"):
 def err(name: str):
     status, body = load_fixture("errors.json")[name]
     return status, {}, body.encode()
+
+
+def tts_edit(response, edit):
+    """Copy of a tts_ok response whose JSON envelope `edit` has changed in place."""
+    status, headers, raw = response
+    envelope = json.loads(raw)
+    edit(envelope)
+    return status, headers, json.dumps(envelope).encode()
+
+
+def lock_dir(case, path):
+    """Make `path` read-only until the test ends; skip if this account can still write."""
+    case.addCleanup(os.chmod, path, 0o700)
+    os.chmod(path, 0o500)
+    probe = Path(path) / ".probe"
+    try:
+        probe.mkdir()
+    except OSError:
+        return
+    probe.rmdir()
+    case.skipTest("this account ignores folder permissions (root?)")

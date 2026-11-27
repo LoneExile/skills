@@ -39,6 +39,17 @@ class KeyLookupTests(unittest.TestCase):
         self.assertEqual(self.resolve(home, {"XAI_API_KEY": "k-env"}),
                          ("k-env", "XAI_API_KEY (environment)", None))
 
+    def test_expired_login_never_counts_whatever_the_margin(self):
+        home = self.home()
+        write_login(home, [("k-login", iso(-100))])
+        # --max-wait -500 makes the margin -320 s: an expired login must stay expired
+        self.assertEqual(
+            grok_image.resolve_key({"XAI_API_KEY": "k-env"}, home, NOW, -320),
+            ("k-env", "XAI_API_KEY (environment)", None))
+        with self.assertRaises(grok_image.KeyMissingError) as cm:
+            grok_image.resolve_key({}, home, NOW, -320)
+        self.assertIn(f"expired at {iso(-100)}", str(cm.exception))
+
     def test_grok_env_after_xai(self):
         home = self.home()
         key, label, note = self.resolve(home, {"GROK_API_KEY": "k-g"})

@@ -81,12 +81,12 @@ def _login_entries(path: Path, now: datetime, min_valid_seconds: float):
             continue
         if expires.tzinfo is None:
             expires = expires.replace(tzinfo=timezone.utc)
-        if expires > now + timedelta(seconds=min_valid_seconds):
-            kind = "long"
-        elif expires > now:
-            kind = "short"
-        else:
+        if expires <= now:
             kind = "expired"
+        elif expires > now + timedelta(seconds=min_valid_seconds):
+            kind = "long"
+        else:
+            kind = "short"
         entries.append((key, written, kind))
     return entries, "no login entry"
 
@@ -159,6 +159,10 @@ def _usable_header_value(key: str) -> bool:
     return "\r" not in key and "\n" not in key
 
 
+def _http_url(url) -> bool:
+    return isinstance(url, str) and url.lower().startswith(("http://", "https://"))
+
+
 def _redact(text: str, key: str) -> str:
     return text.replace(key, "[redacted]") if key else text
 
@@ -191,18 +195,20 @@ def _read_error(e: urllib.error.HTTPError) -> bytes:
 
 
 def _resolve_dest(out, prompt):
-    if out:
-        p = Path(out).expanduser()
-        if p.suffix.lower() in IMG_EXTS:
-            p.parent.mkdir(parents=True, exist_ok=True)
-            return p
-        base = p
+    p = Path(out).expanduser() if out else DEFAULT_OUT
+    if p.suffix.lower() in IMG_EXTS:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        dest = p
     else:
-        base = DEFAULT_OUT
-    base.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe = "".join(c if c.isalnum() else "_" for c in prompt[:40]).strip("_") or "image"
-    return base / f"{ts}_{safe}.jpg"
+        p.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe = "".join(c if c.isalnum() else "_" for c in (prompt or "")[:40]).strip("_") or "image"
+        dest = p / f"{ts}_{safe}.jpg"
+    if dest.is_dir():
+        raise OSError(f"{dest} is a folder")
+    if not os.access(dest.parent, os.W_OK):
+        raise OSError(f"{dest.parent} is not writable")
+    return dest
 
 
 def generate_image(prompt, model="grok-imagine-image", out=None, timeout=120,
@@ -226,7 +232,7 @@ def generate_image(prompt, model="grok-imagine-image", out=None, timeout=120,
     try:
         dest = _resolve_dest(out, prompt)
     except (OSError, RuntimeError) as e:
-        print(f"ERROR: cannot write the output: {e}", file=sys.stderr)
+        print(f"ERROR: cannot write the output: {_redact(str(e), key)}", file=sys.stderr)
         return None
 
     payload = {"model": model, "prompt": prompt, "n": 1}
@@ -257,6 +263,11 @@ def generate_image(prompt, model="grok-imagine-image", out=None, timeout=120,
         image_url = data["data"][0]["url"]
     except (KeyError, IndexError, TypeError):
         print(f"ERROR: unexpected API response: {_redact(json.dumps(data), key)[:400]}", file=sys.stderr)
+        return None
+
+    if not _http_url(image_url):
+        print("ERROR: refusing to download from a non-HTTP(S) URL: "
+              f"{_redact(str(image_url), key)[:400]}", file=sys.stderr)
         return None
 
     try:

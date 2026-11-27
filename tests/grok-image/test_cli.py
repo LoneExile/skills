@@ -21,12 +21,13 @@ class GenerateImageTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.out = self.tmp / "o" / "img.jpg"
 
-    def run_gen(self, srv, env):
+    def run_gen(self, srv, env, prompt="a cat", **kwargs):
+        kwargs.setdefault("out", self.out)
         stdout, stderr = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             result = grok_image.generate_image(
-                "a cat", out=self.out, env=env, home=self.tmp, now=NOW,
-                api_url=srv.url + "/v1/images/generations")
+                prompt, env=env, home=self.tmp, now=NOW,
+                api_url=srv.url + "/v1/images/generations", **kwargs)
         self.assertEqual(stdout.getvalue(), "")
         return result, stderr.getvalue()
 
@@ -143,6 +144,65 @@ class GenerateImageTests(unittest.TestCase):
         self.assertIsNone(result)
         self.assertEqual(len(srv.requests), 0)
         self.assertIn("ERROR: cannot write the output:", stderr)
+
+    def test_output_that_is_a_folder_stops_before_request(self):
+        key = "K-SECRET-0123456789"
+        self.out = self.tmp / f"{key}.jpg"
+        self.out.mkdir()
+        srv = self.stub(self.success)
+        result, stderr = self.run_gen(srv, {"XAI_API_KEY": key})
+        self.assertIsNone(result)
+        self.assertEqual(len(srv.requests), 0)
+        self.assertIn("ERROR: cannot write the output:", stderr)
+        self.assertIn("[redacted]", stderr)
+        self.assertNotIn("K-SECRET", stderr)
+        self.assertNotIn("0123456789", stderr)
+
+    @unittest.skipIf(not hasattr(os, "geteuid") or os.geteuid() == 0,
+                     "a read-only folder stops only a non-root POSIX user")
+    def test_read_only_folder_stops_before_request(self):
+        folder = self.tmp / "readonly"
+        folder.mkdir()
+        folder.chmod(0o500)
+        self.addCleanup(folder.chmod, 0o700)
+        self.out = folder / "img.jpg"
+        srv = self.stub(self.success)
+        result, stderr = self.run_gen(srv, {"XAI_API_KEY": "k-env"})
+        self.assertIsNone(result)
+        self.assertEqual(len(srv.requests), 0)
+        self.assertIn("ERROR: cannot write the output:", stderr)
+        self.assertIn("is not writable", stderr)
+
+    def test_missing_prompt_still_names_the_file(self):
+        srv = self.stub(self.success)
+        result, stderr = self.run_gen(
+            srv, {"XAI_API_KEY": "k-env"}, prompt=None, out=self.tmp / "imgs")
+        self.assertIsNotNone(result, stderr)
+        self.assertTrue(result.endswith("_image.jpg"), result)
+
+    def test_non_http_download_url_refused(self):
+        secret = self.tmp / "secret.txt"
+        secret.write_text("do not copy me")
+        urls = (secret.as_uri(), secret.as_uri().replace("file:", "FILE:", 1),
+                "ftp://127.0.0.1:1/img.jpg", "data:image/jpeg;base64,/9j/")
+        for url in urls:
+            with self.subTest(url=url):
+                body = json.dumps({"data": [{"url": url}]}).encode()
+                srv = self.stub([(200, {}, body)])
+                result, stderr = self.run_gen(srv, {"XAI_API_KEY": "k-env"})
+                self.assertIsNone(result)
+                self.assertIn(
+                    "ERROR: refusing to download from a non-HTTP(S) URL: " + url, stderr)
+                self.assertFalse(self.out.exists())
+                self.assertEqual(len(srv.requests), 1)
+
+    def test_http_url_accepts_only_http_and_https(self):
+        for url in ("http://127.0.0.1:1/img.jpg", "https://imgen.x.ai/img.jpg",
+                    "HTTPS://imgen.x.ai/img.jpg"):
+            self.assertTrue(grok_image._http_url(url), url)
+        for url in ("file:///etc/hosts", "ftp://h/img.jpg", "data:text/plain,x", "httpx://h",
+                    "http:/h", " http://h", "", None, 5):
+            self.assertFalse(grok_image._http_url(url), url)
 
     def test_other_400_is_not_a_rejection(self):
         srv = self.stub([(400, {}, b'{"error":"Argument not supported: size"}')])

@@ -91,12 +91,12 @@ def _login_entries(path: Path, now: datetime, min_valid_seconds: float):
             continue
         if expires.tzinfo is None:
             expires = expires.replace(tzinfo=timezone.utc)
-        if expires > now + timedelta(seconds=min_valid_seconds):
-            kind = "long"
-        elif expires > now:
-            kind = "short"
-        else:
+        if expires <= now:
             kind = "expired"
+        elif expires > now + timedelta(seconds=min_valid_seconds):
+            kind = "long"
+        else:
+            kind = "short"
         entries.append((key, written, kind))
     return entries, "no login entry"
 
@@ -168,6 +168,10 @@ def _usable_header_value(key: str) -> bool:
     return "\r" not in key and "\n" not in key
 
 
+def _http_url(url) -> bool:
+    return isinstance(url, str) and url.lower().startswith(("http://", "https://"))
+
+
 def _redact(text: str, key: str) -> str:
     return text.replace(key, "[redacted]") if key else text
 
@@ -227,26 +231,31 @@ def _image_data_url(image):
 
 
 def _resolve_dest(out, prompt):
-    if out:
-        p = Path(out).expanduser()
-        if p.suffix.lower() == VIDEO_EXT:
-            p.parent.mkdir(parents=True, exist_ok=True)
-            return p
-        base = p
+    p = Path(out).expanduser() if out else DEFAULT_OUT
+    if p.suffix.lower() == VIDEO_EXT:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        dest = p
     else:
-        base = DEFAULT_OUT
-    base.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe = "".join(c if c.isalnum() else "_" for c in prompt[:40]).strip("_") or "video"
-    return base / f"{ts}_{safe}{VIDEO_EXT}"
+        p.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe = "".join(c if c.isalnum() else "_" for c in (prompt or "")[:40]).strip("_") or "video"
+        dest = p / f"{ts}_{safe}{VIDEO_EXT}"
+    if dest.is_dir():
+        raise OSError(f"{dest} is a folder")
+    if not os.access(dest.parent, os.W_OK):
+        raise OSError(f"{dest.parent} is not writable")
+    return dest
 
 
 def generate_video(prompt, model="grok-imagine-video-1.5", duration=8,
                    aspect_ratio="16:9", resolution="720p", image=None,
                    out=None, timeout=120, poll_interval=5, max_wait=600,
                    *, env=None, home=None, now=None, api_url=API_URL,
-                   status_url=STATUS_URL, sleep=time.sleep):
+                   status_url=STATUS_URL, sleep=time.sleep, clock=time.monotonic):
     """Generate a video; return the absolute saved path, or None on failure."""
+    if max_wait <= 0:
+        print("ERROR: --max-wait must be more than 0 seconds.", file=sys.stderr)
+        return None
     env = os.environ if env is None else env
     home = Path.home() if home is None else home
     now = datetime.now(timezone.utc) if now is None else now
@@ -281,9 +290,10 @@ def generate_video(prompt, model="grok-imagine-video-1.5", duration=8,
     try:
         dest = _resolve_dest(out, prompt)
     except (OSError, RuntimeError) as e:
-        print(f"ERROR: cannot write the output: {e}", file=sys.stderr)
+        print(f"ERROR: cannot write the output: {_redact(str(e), key)}", file=sys.stderr)
         return None
 
+    deadline = clock() + max_wait
     try:
         data = _request(api_url, token=key, payload=payload, timeout=timeout)
     except urllib.error.HTTPError as e:
@@ -309,8 +319,7 @@ def generate_video(prompt, model="grok-imagine-video-1.5", duration=8,
 
     url = status_url.format(request_id=request_id)
     last_progress = -1
-    waited = 0
-    while waited < max_wait:
+    while clock() < deadline:
         try:
             result = _request(url, token=key, timeout=timeout)
         except urllib.error.HTTPError as e:
@@ -354,10 +363,14 @@ def generate_video(prompt, model="grok-imagine-video-1.5", duration=8,
                   f"{_redact(json.dumps(result), key)[:400]}", file=sys.stderr)
             return None
 
-        sleep(poll_interval)
-        waited += poll_interval
+        sleep(max(0, min(poll_interval, deadline - clock())))
     else:
         print(f"ERROR: timed out after {max_wait}s waiting for generation.", file=sys.stderr)
+        return None
+
+    if not _http_url(video_url):
+        print("ERROR: refusing to download from a non-HTTP(S) URL: "
+              f"{_redact(str(video_url), key)[:400]}", file=sys.stderr)
         return None
 
     try:
@@ -390,7 +403,7 @@ def main():
     ap.add_argument("--timeout", type=int, default=120,
                     help="per-HTTP-request timeout in seconds (default 120)")
     ap.add_argument("--max-wait", type=int, default=600,
-                    help="total poll budget in seconds (default 600)")
+                    help="total wait in seconds, wall clock from the submit (default 600)")
     args = ap.parse_args()
 
     prompt = " ".join(args.prompt).strip()

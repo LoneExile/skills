@@ -12,7 +12,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from helpers import NOW, StubServer, err, grok_video, iso, write_dotenv, write_login
+from helpers import (FakeClock, NOW, StubServer, err, grok_video, iso, write_dotenv,
+                     write_login)
 
 SUBMIT = (200, {}, b'{"request_id":"r1"}')
 
@@ -22,16 +23,18 @@ class GenerateVideoTests(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.out = self.tmp / "o" / "v.mp4"
-        self.sleeps = []
+        self.clock = FakeClock()
+        self.sleeps = self.clock.sleeps
 
-    def run_gen(self, srv, env):
+    def run_gen(self, srv, env, prompt="a cat", **kwargs):
+        kwargs.setdefault("out", self.out)
         stdout, stderr = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             result = grok_video.generate_video(
-                "a cat", out=self.out, env=env, home=self.tmp, now=NOW,
+                prompt, env=env, home=self.tmp, now=NOW,
                 api_url=srv.url + "/v1/videos/generations",
                 status_url=srv.url + "/v1/videos/{request_id}",
-                sleep=self.sleeps.append)
+                sleep=self.clock.sleep, clock=self.clock, **kwargs)
         return result, stdout.getvalue(), stderr.getvalue()
 
     @staticmethod
@@ -173,7 +176,7 @@ class GenerateVideoTests(unittest.TestCase):
                 "a cat", out=self.out, env={"XAI_API_KEY": "k-env"}, home=self.tmp,
                 api_url=srv.url + "/v1/videos/generations",
                 status_url=srv.url + "/v1/videos/{request_id}",
-                sleep=self.sleeps.append)
+                sleep=self.clock.sleep, clock=self.clock)
         self.assertIsNotNone(result)
         self.assertEqual(srv.requests[0][2]["Authorization"], "Bearer k-env")
 
@@ -197,6 +200,73 @@ class GenerateVideoTests(unittest.TestCase):
         self.assertIsNone(result)
         self.assertEqual(len(srv.requests), 0)
         self.assertIn("ERROR: cannot write the output:", stderr)
+
+    def test_output_that_is_a_folder_stops_before_request(self):
+        key = "K-SECRET-0123456789"
+        self.out = self.tmp / f"{key}.mp4"
+        self.out.mkdir()
+        srv = self.stub(self.success)
+        result, stdout, stderr = self.run_gen(srv, {"XAI_API_KEY": key})
+        self.assertEqual(stdout, "")
+        self.assertIsNone(result)
+        self.assertEqual(len(srv.requests), 0)
+        self.assertIn("ERROR: cannot write the output:", stderr)
+        self.assertIn("[redacted]", stderr)
+        self.assertNotIn("K-SECRET", stderr)
+        self.assertNotIn("0123456789", stderr)
+
+    @unittest.skipIf(not hasattr(os, "geteuid") or os.geteuid() == 0,
+                     "a read-only folder stops only a non-root POSIX user")
+    def test_read_only_folder_stops_before_request(self):
+        folder = self.tmp / "readonly"
+        folder.mkdir()
+        folder.chmod(0o500)
+        self.addCleanup(folder.chmod, 0o700)
+        self.out = folder / "v.mp4"
+        srv = self.stub(self.success)
+        result, stdout, stderr = self.run_gen(srv, {"XAI_API_KEY": "k-env"})
+        self.assertEqual(stdout, "")
+        self.assertIsNone(result)
+        self.assertEqual(len(srv.requests), 0)
+        self.assertIn("ERROR: cannot write the output:", stderr)
+        self.assertIn("is not writable", stderr)
+
+    def test_missing_prompt_with_an_image_still_names_the_file(self):
+        image = self.tmp / "start.png"
+        image.write_bytes(b"\x89PNG")
+        srv = self.stub(self.success)
+        result, _, stderr = self.run_gen(
+            srv, {"XAI_API_KEY": "k-env"}, prompt=None, image=str(image),
+            out=self.tmp / "vids")
+        self.assertIsNotNone(result, stderr)
+        self.assertTrue(result.endswith("_video.mp4"), result)
+        body = srv.requests[0][3]
+        self.assertNotIn("prompt", body)
+        self.assertTrue(body["image"]["url"].startswith("data:image/png;base64,"))
+
+    def test_non_http_download_url_refused(self):
+        secret = self.tmp / "secret.txt"
+        secret.write_text("do not copy me")
+        urls = (secret.as_uri(), secret.as_uri().replace("file:", "FILE:", 1),
+                "ftp://127.0.0.1:1/v.mp4", "data:video/mp4;base64,AAAA")
+        for url in urls:
+            with self.subTest(url=url):
+                body = json.dumps({"status": "done", "video": {"url": url}}).encode()
+                srv = self.stub([SUBMIT, (200, {}, body)])
+                result, _, stderr = self.run_gen(srv, {"XAI_API_KEY": "k-env"})
+                self.assertIsNone(result)
+                self.assertIn(
+                    "ERROR: refusing to download from a non-HTTP(S) URL: " + url, stderr)
+                self.assertFalse(self.out.exists())
+                self.assertEqual(len(srv.requests), 2)
+
+    def test_http_url_accepts_only_http_and_https(self):
+        for url in ("http://127.0.0.1:1/v.mp4", "https://vidgen.x.ai/v.mp4",
+                    "HTTPS://vidgen.x.ai/v.mp4"):
+            self.assertTrue(grok_video._http_url(url), url)
+        for url in ("file:///etc/hosts", "ftp://h/v.mp4", "data:text/plain,x", "httpx://h",
+                    "http:/h", " http://h", "", None, 5):
+            self.assertFalse(grok_video._http_url(url), url)
 
     def test_video_margin_includes_max_wait(self):
         write_login(self.tmp, [("k-login", iso(700))])
@@ -224,17 +294,11 @@ class GenerateVideoTests(unittest.TestCase):
 
     def test_non_object_poll_body_counts_as_pending(self):
         srv = self.stub([SUBMIT] + [(200, {}, b"[]")] * 3)
-        stdout, stderr = io.StringIO(), io.StringIO()
-        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            result = grok_video.generate_video(
-                "a cat", out=self.out, env={"XAI_API_KEY": "k-env"}, home=self.tmp,
-                now=NOW, max_wait=15, poll_interval=5,
-                api_url=srv.url + "/v1/videos/generations",
-                status_url=srv.url + "/v1/videos/{request_id}",
-                sleep=self.sleeps.append)
+        result, _, stderr = self.run_gen(
+            srv, {"XAI_API_KEY": "k-env"}, max_wait=15, poll_interval=5)
         self.assertIsNone(result)
         self.assertEqual(self.sleeps, [5, 5, 5])
-        self.assertIn("ERROR: timed out after 15s", stderr.getvalue())
+        self.assertIn("ERROR: timed out after 15s", stderr)
 
     def test_every_printed_server_text_is_redacted(self):
         key = "K-SECRET-0123456789"
@@ -265,6 +329,47 @@ class GenerateVideoTests(unittest.TestCase):
                 result, _, _ = self.run_gen(srv, {"XAI_API_KEY": "k-env"})
                 self.assertIsNotNone(result)
                 self.assertEqual(srv.requests[0][2]["Authorization"], f"Bearer {sent}")
+
+    def test_max_wait_of_zero_or_less_refused_before_anything(self):
+        for max_wait in (0, -5):
+            with self.subTest(max_wait=max_wait):
+                srv = self.stub(self.success)
+                result, stdout, stderr = self.run_gen(
+                    srv, {"XAI_API_KEY": "k-env"}, max_wait=max_wait)
+                self.assertIsNone(result)
+                self.assertEqual(srv.requests, [])
+                self.assertEqual(stdout, "")
+                self.assertEqual(
+                    stderr, "ERROR: --max-wait must be more than 0 seconds.\n")
+
+    def test_poll_budget_is_wall_clock(self):
+        deadline = self.clock() + 20
+        starts = []
+
+        def slow_poll(method, path):  # every poll takes 4 s of its own
+            if path.startswith("/v1/videos/r1"):
+                starts.append(self.clock())
+                self.clock.advance(4)
+
+        srv = self.stub([SUBMIT] + [(200, {}, b'{"status":"pending"}')] * 6)
+        srv.on_request = slow_poll
+        result, _, stderr = self.run_gen(
+            srv, {"XAI_API_KEY": "k-env"}, max_wait=20, poll_interval=5)
+        self.assertIsNone(result)
+        self.assertEqual(len(starts), 3)
+        self.assertTrue(all(s < deadline for s in starts), starts)
+        self.assertTrue(all(0 <= s <= 5 for s in self.sleeps), self.sleeps)
+        self.assertIn("ERROR: timed out after 20s waiting for generation.", stderr)
+
+    def test_last_sleep_never_runs_past_the_deadline(self):
+        start = self.clock()
+        srv = self.stub([SUBMIT] + [(200, {}, b'{"status":"pending"}')] * 4)
+        result, _, stderr = self.run_gen(
+            srv, {"XAI_API_KEY": "k-env"}, max_wait=7, poll_interval=5)
+        self.assertIsNone(result)
+        self.assertEqual(self.sleeps, [5, 2])
+        self.assertEqual(self.clock() - start, 7)
+        self.assertIn("ERROR: timed out after 7s waiting for generation.", stderr)
 
 
 class CliContractTests(unittest.TestCase):

@@ -50,6 +50,24 @@ def write_dotenv(home: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+class FakeClock:
+    """A monotonic clock that only `sleep` and `advance` move, so no test really waits."""
+
+    def __init__(self, start: float = 1000.0):
+        self.now = start
+        self.sleeps = []
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
 class StubServer:
     """Serve canned (status, headers, body) responses in order on 127.0.0.1."""
 
@@ -57,6 +75,7 @@ class StubServer:
         self._responses = list(responses)
         self.requests = []
         self._lock = threading.Lock()
+        self.on_request = None  # optional callback(method, path), run before each reply
         stub = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -73,6 +92,8 @@ class StubServer:
                     else:
                         status, headers, payload = (
                             500, {}, b'{"error":"stub exhausted"}')
+                if stub.on_request:
+                    stub.on_request(self.command, self.path)
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 if "Content-Length" not in headers:

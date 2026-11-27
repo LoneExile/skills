@@ -77,6 +77,12 @@ class BatchTests(unittest.TestCase):
             code, _, _, reqs = self.batch(
                 [{"id": "x", "text": "Hi"}, {"id": "x", "text": "Yo"}])
             self.assertEqual((code, len(reqs)), (2, 0))
+        for a, b in (("Intro", "intro"), ("caf\u00e9", "cafe\u0301")):
+            with self.subTest(pair=(a, b)):
+                code, _, e, reqs = self.batch(
+                    [{"id": a, "text": "Hi"}, {"id": b, "text": "Yo"}],
+                    [tts_ok("Hi"), tts_ok("Yo")])
+                self.assertEqual((code, len(reqs)), (2, 0), e)
 
     def test_batch_out_dir_outside_project(self):
         code, _, _, reqs = self.batch(

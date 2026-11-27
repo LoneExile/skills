@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import unicodedata
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
@@ -658,14 +659,17 @@ def run_batch(script: Path, out_dir: Path, project: Path, *, voice: str,
               sleep=time.sleep, rand=random.random) -> Path:
     """Speak every line of `script`; write `lines.json`; return its path."""
     data = _load_script(script)
-    seen = set()
+    seen = {}
     texts = []
     for item in data:
         line_id = item["id"]
         _check_line_id(line_id)
-        if line_id in seen:
-            raise UsageError(f"line id {line_id!r} is used twice")
-        seen.add(line_id)
+        folded = unicodedata.normalize("NFC", line_id).casefold()
+        if folded in seen:
+            raise UsageError(
+                f"line ids {seen[folded]!r} and {line_id!r} name the same file "
+                "(ids must differ by more than case or Unicode form)")
+        seen[folded] = line_id
         text = item["text"].strip()
         try:
             warning = validate_request(text, lang, speed)

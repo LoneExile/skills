@@ -1,0 +1,22 @@
+{
+ "bad_key": [
+  400,
+  "{\"code\":\"Client specified an invalid argument\",\"error\":\"Incorrect API key provided. You can obtain an API key from https://console.x.ai.\"}"
+ ],
+ "expired_oauth": [
+  403,
+  "{\"code\":\"The caller does not have permission to execute the specified operation\",\"error\":\"The OAuth2 access token could not be validated. [WKE=unauthenticated:bad-credentials]\"}"
+ ],
+ "unknown_voice": [
+  404,
+  "{\"error\":\"TTS synthesis failed: Voice 'nonexistent-voice-zz' not found\"}"
+ ],
+ "empty_text": [
+  400,
+  "{\"error\":\"Field `text` must not be empty\"}"
+ ],
+ "voices": [
+  200,
+  "{\"voices\":[{\"voice_id\":\"eve\",\"name\":\"Eve\",\"language\":\"multilingual\",\"gender\":\"female\"},{\"voice_id\":\"rex\",\"name\":\"Rex\",\"language\":\"multilingual\",\"gender\":\"male\"}]}"
+ ]
+}

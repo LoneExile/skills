@@ -170,40 +170,55 @@ def check_mp3(data: bytes, expected_duration: float, ffprobe: str | None) -> Non
 def atomic_write_many(items: list) -> None:
     """Write all files via .part files, then replace each destination.
 
-    Existing destinations are snapshotted to .bak first. On any failure every
-    destination goes back to its previous content (or is removed if it did not
-    exist), leftover .part and .bak files are deleted, and the error is
-    re-raised.
+    Work files get per-call unique names next to their destination, so a
+    user's own `.part`/`.bak` files are never touched. Existing destinations
+    are snapshotted to .bak first; a snapshot counts only once it is complete.
+    On any failure every destination goes back to its previous content (or is
+    removed if it did not exist), leftover work files are deleted, and the
+    error is re-raised. A snapshot whose restore failed is kept on disk and
+    named in a note on the error.
     """
     dests = [Path(d) for d, _ in items]
-    parts = [Path(str(d) + ".part") for d in dests]
-    baks = [Path(str(d) + ".bak") for d in dests]
+    tag = os.urandom(4).hex()
+    parts = [Path(f"{d}.{tag}.part") for d in dests]
+    baks = [Path(f"{d}.{tag}.bak") for d in dests]
     existed = [d.exists() for d in dests]
+    snapped = [False] * len(dests)
     try:
         for part, (_, payload) in zip(parts, items):
             part.write_bytes(payload)
-        for dest, bak, had in zip(dests, baks, existed):
-            bak.unlink(missing_ok=True)
-            if had:
+        for i, (dest, bak) in enumerate(zip(dests, baks)):
+            if not existed[i]:
+                continue
+            try:
                 try:
                     os.link(dest, bak)
                 except OSError:
+                    bak.unlink(missing_ok=True)
                     shutil.copy2(dest, bak)
+            except BaseException:
+                bak.unlink(missing_ok=True)  # incomplete snapshot: never restore
+                raise
+            snapped[i] = True
         for part, dest in zip(parts, dests):
             os.replace(part, dest)
-    except BaseException:
-        # Rollback is driven by the snapshot record, not by progress
-        # bookkeeping, so an interrupt at any point is undone.
-        for dest, bak, had in zip(dests, baks, existed):
+    except BaseException as exc:
+        kept = set()
+        for i, (dest, bak) in enumerate(zip(dests, baks)):
             try:
-                if bak.exists():
+                if snapped[i]:
                     shutil.move(str(bak), str(dest))
-                elif not had:
+                elif not existed[i]:
                     dest.unlink(missing_ok=True)
-            except OSError:
-                pass
+            except OSError as restore_err:
+                kept.add(bak)
+                exc.add_note(
+                    f"could not restore {dest} ({restore_err}); "
+                    f"its previous content is kept in {bak}"
+                )
         for p in parts + baks:
-            p.unlink(missing_ok=True)
+            if p not in kept:
+                p.unlink(missing_ok=True)
         raise
     for bak in baks:
         bak.unlink(missing_ok=True)

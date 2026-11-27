@@ -74,3 +74,39 @@ class AtomicWriteTest(unittest.TestCase):
                 grok_tts.atomic_write_many([(self.a, b"new-a"), (self.b, b"new-b")])
         self.assertFalse(self.a.exists()); self.assertFalse(self.b.exists())
         self.assertEqual(list(self.dir.glob("*.part")) + list(self.dir.glob("*.bak")), [])
+    def test_partial_snapshot_never_restored(self):
+        real_copy = grok_tts.shutil.copy2
+        def fake_copy(src, dst, *args, **kwargs):
+            if "words" in Path(src).name:
+                Path(dst).write_bytes(b"ol")
+                raise OSError(28, "No space left on device")
+            return real_copy(src, dst, *args, **kwargs)
+        with mock.patch.object(grok_tts.os, "link", side_effect=OSError), \
+                mock.patch.object(grok_tts.shutil, "copy2", side_effect=fake_copy):
+            with self.assertRaises(OSError):
+                grok_tts.atomic_write_many([(self.a, b"new-a"), (self.b, b"new-b")])
+        self.assertEqual(self.a.read_bytes(), b"old-a")
+        self.assertEqual(self.b.read_bytes(), b"old-b")
+        self.assertEqual(list(self.dir.glob("*.part")) + list(self.dir.glob("*.bak")), [])
+    def test_failed_restore_keeps_snapshot_and_names_it(self):
+        with self.failing_second_rename(), \
+                mock.patch.object(grok_tts.shutil, "move", side_effect=OSError("restore failed")):
+            with self.assertRaises(OSError) as cm:
+                grok_tts.atomic_write_many([(self.a, b"new-a"), (self.b, b"new-b")])
+        notes = "\n".join(getattr(cm.exception, "__notes__", []))
+        holders = [p for p in self.dir.iterdir() if p.read_bytes() == b"old-a" and p != self.a]
+        self.assertTrue(holders)
+        self.assertTrue(any(str(p) in notes for p in holders))
+    def test_user_bak_and_part_files_untouched(self):
+        bak = self.dir / "a.wav.bak"; part = self.dir / "a.wav.part"
+        bak.write_bytes(b"USER BAK"); part.write_bytes(b"USER PART")
+        def user_files_intact():
+            self.assertEqual((bak.read_bytes(), part.read_bytes()), (b"USER BAK", b"USER PART"))
+            self.assertEqual(sorted(p.name for p in self.dir.iterdir()),
+                             sorted(["a.wav", "a.words.json", "a.wav.bak", "a.wav.part"]))
+        grok_tts.atomic_write_many([(self.a, b"new-a"), (self.b, b"new-b")])
+        user_files_intact()
+        with self.failing_second_rename():
+            with self.assertRaises(OSError):
+                grok_tts.atomic_write_many([(self.a, b"x-a"), (self.b, b"x-b")])
+        user_files_intact()

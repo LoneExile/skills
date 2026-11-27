@@ -2,17 +2,19 @@
 """
 grok-image skill (OMP).
 
-Generate images via the xAI Imagine API using the xAI OAuth token from the
-`grok` CLI (~/.grok/auth.json). Stdlib-only (urllib) -- no `requests` and no
-`xai-...` console API key required.
+Generate images via the xAI Imagine API. The key is the xAI OAuth token from
+the `grok` CLI (~/.grok/auth.json) when it is valid long enough, else
+XAI_API_KEY / GROK_API_KEY from the environment or ~/.omp/.env. Stdlib-only.
 
-The token is read FRESH on every invocation, so refreshes performed by the
+The key is read FRESH on every invocation, so refreshes performed by the
 grok CLI are picked up automatically.
 """
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
+import os
 import re
 import sys
 import urllib.error
@@ -22,7 +24,6 @@ from pathlib import Path
 from typing import Mapping
 
 API_URL = "https://api.x.ai/v1/images/generations"
-GROK_AUTH_JSON = Path.home() / ".grok" / "auth.json"
 DEFAULT_OUT = Path.home() / "generated-images"
 IMG_EXTS = (".jpg", ".jpeg", ".png", ".webp")
 
@@ -142,61 +143,51 @@ def resolve_key(env: Mapping[str, str], home: Path, now: datetime,
 # --- end key lookup ---
 
 
-def _expired(iso):
-    """Best-effort: True if an ISO-8601 timestamp is in the past."""
+# --- request safety (keep identical in grok_image.py and grok_video.py) ---
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Never follow redirects: the Authorization header must stay on one host."""
+
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def _usable_header_value(key: str) -> bool:
     try:
-        return datetime.fromisoformat(iso.replace("Z", "+00:00")) <= datetime.now(timezone.utc)
-    except Exception:  # noqa: BLE001
+        key.encode("latin-1")
+    except UnicodeEncodeError:
         return False
+    return "\r" not in key and "\n" not in key
 
 
-def _token_from_grok_cli():
-    """xAI access token from the grok CLI store (~/.grok/auth.json).
+def _redact(text: str, key: str) -> str:
+    return text.replace(key, "[redacted]") if key else text
 
-    Entries are keyed by "<issuer>::<client_id>"; the access token is under "key".
-    Prefer an unexpired entry, else fall back to any entry with a token.
-    """
-    if not GROK_AUTH_JSON.exists():
-        return None
+
+def _error_text(raw: bytes, key: str) -> str:
+    return _redact(raw.decode("utf-8", errors="replace"), key)[:400]
+
+
+def _rejected(status: int, raw: bytes) -> bool:
+    if status in (401, 403):
+        return True
+    return status == 400 and "api key" in raw.decode("utf-8", errors="replace").lower()
+
+
+def _hint(label: str) -> str:
+    if label == LOGIN_LABEL:
+        return ("HINT: Run `grok` to log in again, or move ~/.grok/auth.json aside "
+                "to use your API key.")
+    return "HINT: Check the key at https://console.x.ai."
+
+
+def _read_error(e: urllib.error.HTTPError) -> bytes:
     try:
-        data = json.loads(GROK_AUTH_JSON.read_text())
-    except Exception:  # noqa: BLE001
-        return None
-    fallback = None
-    for entry in (data.values() if isinstance(data, dict) else []):
-        if isinstance(entry, dict) and entry.get("key"):
-            exp = entry.get("expires_at")
-            if not exp or not _expired(exp):
-                return entry["key"]
-            fallback = fallback or entry["key"]
-    return fallback
-
-
-def load_xai_token():
-    """Load the xAI OAuth token from the grok CLI store (~/.grok/auth.json), fresh each call."""
-    tok = _token_from_grok_cli()
-    if tok:
-        return tok
-    print(
-        "ERROR: no xAI OAuth token found in ~/.grok/auth.json.\n"
-        "       Log in with the grok CLI (run `grok`), then retry.",
-        file=sys.stderr,
-    )
-    return None
-
-
-def _post_json(url, token, payload, timeout):
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode(),
-        method="POST",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode())
+        return e.read()
+    except (OSError, http.client.HTTPException, ValueError):
+        return b""
+    finally:
+        e.close()
+# --- end request safety ---
 
 
 def _resolve_dest(out, prompt):
@@ -214,25 +205,46 @@ def _resolve_dest(out, prompt):
     return base / f"{ts}_{safe}.jpg"
 
 
-def generate_image(prompt, model="grok-imagine-image", out=None, timeout=120):
+def generate_image(prompt, model="grok-imagine-image", out=None, timeout=120,
+                   *, env=None, home=None, now=None, api_url=API_URL):
     """Generate an image; return the absolute saved path, or None on failure."""
-    token = load_xai_token()
-    if not token:
+    env = os.environ if env is None else env
+    home = Path.home() if home is None else home
+    now = datetime.now(timezone.utc) if now is None else now
+    try:
+        key, label, note = resolve_key(env, home, now, timeout + 60)
+    except KeyMissingError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return None
+    if note:
+        print(note, file=sys.stderr)
+    print(f"Key: {label}", file=sys.stderr)
+    if not _usable_header_value(key):
+        print(f"ERROR: the key from {label} is not a valid header value", file=sys.stderr)
         return None
 
     payload = {"model": model, "prompt": prompt, "n": 1}
-
+    req = urllib.request.Request(
+        api_url,
+        data=json.dumps(payload).encode(),
+        method="POST",
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+    )
     try:
-        data = _post_json(API_URL, token, payload, timeout)
+        with urllib.request.build_opener(_NoRedirect).open(req, timeout=timeout) as r:
+            data = json.loads(r.read().decode())
     except urllib.error.HTTPError as e:
-        detail = e.read().decode(errors="replace")[:400]
-        print(f"ERROR: xAI API HTTP {e.code}: {detail}", file=sys.stderr)
-        if e.code in (400, 401, 403) and "api key" in detail.lower():
-            print("HINT: the OAuth token is missing/expired -- refresh the grok CLI (run `grok`) and retry.",
+        raw = _read_error(e)
+        text = _error_text(raw, key)
+        if _rejected(e.code, raw):
+            print(f"ERROR: the key from {label} was rejected (HTTP {e.code}): {text}",
                   file=sys.stderr)
+            print(_hint(label), file=sys.stderr)
+        else:
+            print(f"ERROR: xAI API HTTP {e.code}: {text}", file=sys.stderr)
         return None
     except Exception as e:  # noqa: BLE001
-        print(f"ERROR calling xAI API: {e}", file=sys.stderr)
+        print(f"ERROR calling xAI API: {_redact(str(e), key)}", file=sys.stderr)
         return None
 
     try:

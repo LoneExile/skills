@@ -7,8 +7,10 @@ Stdlib-only (urllib) -- no `requests` and no third-party packages.
 
 This module has no side effects at import time: no network, no file access.
 """
+import argparse
 import base64
 import binascii
+import hashlib
 import http.client
 import json
 import math
@@ -18,11 +20,12 @@ import re
 import shutil
 import struct
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -504,3 +507,181 @@ def list_voices(*, key: str, source: str, api_base: str = API_BASE,
     if not isinstance(voices, list):
         raise ApiError("unexpected response shape: no voices list")
     return voices
+
+
+DOCUMENTED_LANGS = frozenset({
+    "auto", "en", "ar-eg", "ar-sa", "ar-ae", "bn", "zh", "fr", "de", "hi", "id",
+    "it", "ja", "ko", "pt-br", "pt-pt", "ru", "es-mx", "es-es", "tr", "vi",
+})
+MAX_TEXT_CHARS = 60000
+_LANG_RE = re.compile(r"^[A-Za-z]{2,3}(-[A-Za-z]{2,4})?$")
+
+
+def validate_request(text: str, lang: str, speed: float) -> str | None:
+    """Raise UsageError on bad input; return a warning for an undocumented language."""
+    stripped = text.strip()
+    if not stripped:
+        raise UsageError("text is empty")
+    if len(stripped) > MAX_TEXT_CHARS:
+        raise UsageError(
+            f"text is {len(stripped)} characters; the limit is {MAX_TEXT_CHARS} per request")
+    if strip_tags(stripped).strip() == "":
+        raise UsageError("text has only speech tags and nothing to say")
+    if not 0.7 <= speed <= 1.5:
+        raise UsageError(f"speed {speed} is out of range; use 0.7 to 1.5")
+    if lang.lower() != "auto" and not _LANG_RE.match(lang):
+        raise UsageError(
+            f"language {lang!r} is not a language code; use auto or a code like en or pt-BR")
+    if lang.lower() not in DOCUMENTED_LANGS:
+        return f"language {lang!r} is not in the documented list; sending it anyway"
+    return None
+
+
+def cache_key(text: str, voice: str, lang: str, speed: float,
+              normalize: bool, fmt: str) -> str:
+    """sha256 over everything that changes the audio."""
+    canonical = json.dumps(
+        {"v": 1, "text": text, "voice": voice.lower(), "lang": lang.lower(),
+         "speed": speed, "normalize": normalize, "fmt": fmt},
+        sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def default_cache_dir(env: Mapping[str, str], home: Path) -> Path:
+    base = env.get("XDG_CACHE_HOME")
+    return (Path(base) if base else home / ".cache") / "grok-tts"
+
+
+def _words_json(words: list) -> bytes:
+    return json.dumps(words, indent=1, ensure_ascii=False).encode("utf-8")
+
+
+def produce(text: str, dest: Path, words_dest: Path | None, *, voice: str,
+            lang: str, speed: float, normalize: bool, cache_dir: Path,
+            use_cache: bool, key_provider: Callable[[], tuple],
+            api_base: str = API_BASE, timeout: float = 300, ffprobe=None,
+            sleep=time.sleep, rand=random.random) -> tuple:
+    """Write `dest` (and `words_dest`); return (words, cached)."""
+    fmt = dest.suffix.lower().lstrip(".")
+    digest = cache_key(text, voice, lang, speed, normalize, fmt)
+    audio_cache = cache_dir / f"{digest}.{fmt}"
+    words_cache = cache_dir / f"{digest}.words.json"
+    if use_cache and audio_cache.is_file() and words_cache.is_file():
+        try:
+            audio = audio_cache.read_bytes()
+            words_raw = words_cache.read_bytes()
+            words = json.loads(words_raw)
+        except (OSError, ValueError):
+            words = None
+        if isinstance(words, list):
+            items = [(dest, audio)]
+            if words_dest is not None:
+                items.append((words_dest, words_raw))
+            atomic_write_many(items)
+            return words, True
+    key, source = key_provider()
+    result = synthesize(text, voice=voice, lang=lang, speed=speed,
+                        normalize=normalize, fmt=fmt, key=key, source=source,
+                        api_base=api_base, timeout=timeout, ffprobe=ffprobe,
+                        sleep=sleep, rand=rand)
+    words_raw = _words_json(result.words)
+    items = [(dest, result.audio)]
+    if words_dest is not None:
+        items.append((words_dest, words_raw))
+    atomic_write_many(items)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    atomic_write_many([(audio_cache, result.audio), (words_cache, words_raw)])
+    return result.words, False
+
+
+class _Parser(argparse.ArgumentParser):
+    def error(self, message):
+        raise UsageError(message)
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    p = _Parser(prog="grok_tts.py",
+                description="Turn text into Grok (xAI) TTS audio with word timings.")
+    p.add_argument("text", nargs="?", help="text to speak, or a path to a text file")
+    p.add_argument("-o", "--out", help="output audio file (.wav or .mp3)")
+    p.add_argument("--words", help="write word timings to this JSON file")
+    p.add_argument("--lines", help="batch mode: JSON file of lines")
+    p.add_argument("--out-dir", default="voiceover", help="batch output folder")
+    p.add_argument("--project", default=".", help="project folder for batch mode")
+    p.add_argument("--voice", default="eve")
+    p.add_argument("--lang", default="en")
+    p.add_argument("--speed", type=float, default=1.0)
+    p.add_argument("--normalize", action="store_true")
+    p.add_argument("--no-cache", action="store_true")
+    p.add_argument("--timeout", type=float, default=300)
+    p.add_argument("--list", action="store_true", help="list the available voices")
+    return p
+
+
+def _read_text(arg: str) -> str:
+    try:
+        is_file = Path(arg).is_file()
+    except OSError:  # e.g. text too long to be a file name
+        return arg
+    return Path(arg).read_text(encoding="utf-8-sig") if is_file else arg
+
+
+def _run(args, *, api_base, env, home, now, sleep, rand) -> int:
+    key_provider = lambda: resolve_key(env, home, now)  # noqa: E731
+    if args.list:
+        if any([args.text, args.out, args.words, args.lines]):
+            raise UsageError("--list cannot be combined with text, -o, --words or --lines")
+        key, source = key_provider()
+        for v in list_voices(key=key, source=source, api_base=api_base,
+                             timeout=args.timeout, sleep=sleep, rand=rand):
+            print(f"{v.get('voice_id', '')}\t{v.get('name', '')}\t{v.get('gender', '')}")
+        return 0
+    if args.lines is not None:
+        if args.text or args.out or args.words:
+            raise UsageError("--lines cannot be combined with text, -o or --words")
+        raise UsageError("--lines batch mode is not available yet")
+    if not args.text or not args.out:
+        raise UsageError("give the text and -o OUT.wav, or use --lines or --list")
+    dest = Path(args.out)
+    if dest.suffix.lower() not in (".wav", ".mp3"):
+        raise UsageError("-o must end in .wav or .mp3")
+    text = _read_text(args.text).strip()
+    warning = validate_request(text, args.lang, args.speed)
+    if warning:
+        print(f"WARNING: {warning}", file=sys.stderr)
+    words_dest = Path(args.words) if args.words else None
+    _, cached = produce(
+        text, dest, words_dest, voice=args.voice, lang=args.lang,
+        speed=args.speed, normalize=args.normalize,
+        cache_dir=default_cache_dir(env, home), use_cache=not args.no_cache,
+        key_provider=key_provider, api_base=api_base, timeout=args.timeout,
+        ffprobe=shutil.which("ffprobe"), sleep=sleep, rand=rand)
+    absolute = dest.resolve()
+    print(f"Audio saved to: {absolute}" + (" (cached)" if cached else ""))
+    print(f"MEDIA:{absolute}")
+    if words_dest is not None:
+        print(f"Words saved to: {words_dest.resolve()}")
+    return 0
+
+
+def main(argv: list | None = None, *, api_base: str = API_BASE,
+         env: Mapping | None = None, home: Path | None = None,
+         now: datetime | None = None, sleep=time.sleep,
+         rand=random.random) -> int:
+    env = os.environ if env is None else env
+    home = Path.home() if home is None else home
+    now = datetime.now(timezone.utc) if now is None else now
+    try:
+        args = _build_parser().parse_args(argv)
+        return _run(args, api_base=api_base, env=env, home=home, now=now,
+                    sleep=sleep, rand=rand)
+    except GrokTTSError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return exc.exit_code
+    except OSError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

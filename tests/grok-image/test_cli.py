@@ -127,7 +127,7 @@ class GenerateImageTests(unittest.TestCase):
 
     def test_unexpected_response_redacted(self):
         key = "K-SECRET-0123456789"
-        srv = self.stub([(200, {}, json.dumps("x" * 380 + key).encode())])
+        srv = self.stub([(200, {}, json.dumps("x" * 384 + key).encode())])
         result, stderr = self.run_gen(srv, {"XAI_API_KEY": key})
         self.assertIsNone(result)
         self.assertIn("unexpected API response", stderr)

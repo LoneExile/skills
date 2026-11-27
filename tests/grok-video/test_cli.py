@@ -371,6 +371,20 @@ class GenerateVideoTests(unittest.TestCase):
         self.assertEqual(self.clock() - start, 7)
         self.assertIn("ERROR: timed out after 7s waiting for generation.", stderr)
 
+    def test_submit_time_counts_against_max_wait(self):
+        def slow_submit(method, path):  # the submit itself takes 10 s
+            if method == "POST":
+                self.clock.advance(10)
+
+        srv = self.stub([SUBMIT] + [(200, {}, b'{"status":"pending"}')] * 3)
+        srv.on_request = slow_submit
+        result, _, stderr = self.run_gen(
+            srv, {"XAI_API_KEY": "k-env"}, max_wait=12, poll_interval=5)
+        self.assertIsNone(result)
+        self.assertEqual([m for m, _, _, _ in srv.requests], ["POST", "GET"])
+        self.assertEqual(self.sleeps, [2])
+        self.assertIn("ERROR: timed out after 12s waiting for generation.", stderr)
+
 
 class CliContractTests(unittest.TestCase):
     def test_cli_failure_contract(self):

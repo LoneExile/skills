@@ -373,7 +373,7 @@ def generate_video(prompt, model="grok-imagine-video-1.5", duration=8,
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Generate a video via the xAI Imagine API (OAuth token).")
+        description="Generate a video via the xAI Imagine API (grok CLI login or xAI API key).")
     ap.add_argument("prompt", nargs="*", help="video prompt (optional with --image)")
     ap.add_argument("--model", default="grok-imagine-video-1.5", choices=MODELS,
                     help="grok-imagine-video-1.5 (default) | grok-imagine-video")

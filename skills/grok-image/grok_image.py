@@ -272,7 +272,7 @@ def generate_image(prompt, model="grok-imagine-image", out=None, timeout=120,
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Generate an image via the xAI Imagine API (OAuth token).")
+        description="Generate an image via the xAI Imagine API (grok CLI login or xAI API key).")
     ap.add_argument("prompt", nargs="+", help="image prompt")
     ap.add_argument("--model", default="grok-imagine-image",
                     choices=["grok-imagine-image", "grok-imagine-image-quality"],

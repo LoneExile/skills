@@ -31,8 +31,8 @@ No npm publish or registry step is involved — this GitHub repo *is* the source
 
 | Skill | Description |
 | ----- | ----------- |
-| [`grok-image`](skills/grok-image/) | Generate real raster images via xAI's Grok **Imagine** API using the `grok` CLI's OAuth token — no console API key, stdlib-only Python. |
-| [`grok-video`](skills/grok-video/) | Generate real MP4 videos via xAI's Grok **Imagine** video API using the `grok` CLI's OAuth token — no console API key, stdlib-only Python. |
+| [`grok-image`](skills/grok-image/) | Generate real raster images via xAI's Grok **Imagine** API, signing in with the `grok` CLI login or else an xAI API key (`XAI_API_KEY`, `GROK_API_KEY` or `~/.omp/.env`). Stdlib-only Python. |
+| [`grok-video`](skills/grok-video/) | Generate real MP4 videos via xAI's Grok **Imagine** video API, signing in with the `grok` CLI login or else an xAI API key (`XAI_API_KEY`, `GROK_API_KEY` or `~/.omp/.env`). Stdlib-only Python. |
 | [`grok-tts`](skills/grok-tts/) | Turn text into Grok (xAI) voiceover WAV/MP3 files with word-level timings; batch mode writes HyperFrames media-use recording lines. Stdlib-only Python. |
 | [`highlighted-source-reference-cards`](skills/highlighted-source-reference-cards/) | Turn vendor docs and PDF pages into browser-style **reference cards** with pink highlights on the exact lines that back a number, plus the URL bar and capture date. Zero-dependency Node + headless Chrome; poppler for PDFs. |
 | [`terminal-demo-video`](skills/terminal-demo-video/) | Record a real terminal session (CLI/TUI) to a looping GIF + MP4 via tmux + asciinema + agg — captures real keystrokes and Alt/Ctrl chords that VHS drops. |
@@ -41,8 +41,8 @@ No npm publish or registry step is involved — this GitHub repo *is* the source
 
 Generates images with `grok-imagine-image` / `grok-imagine-image-quality` and saves a local file, printing a `MEDIA:<path>` line for native delivery/embedding.
 
-- **Requires:** the [`grok` CLI](https://github.com/superagent-ai/grok-cli) logged in (it stores an xAI OAuth token at `~/.grok/auth.json`, which the skill reads fresh each call), plus `python3`.
-- **Note:** this targets Grok's Imagine endpoint via the grok CLI's OAuth session — not an officially documented public API. It can change upstream, and image generation is **billed to the xAI account** behind that token.
+- **Requires:** the [`grok` CLI](https://github.com/superagent-ai/grok-cli) logged in (`~/.grok/auth.json`, read fresh each call; it must stay valid for `--timeout` + 60 s, else a key is preferred) **or** an xAI API key (`XAI_API_KEY` or `GROK_API_KEY` in the environment, or in `~/.omp/.env`), plus `python3` 3.9+. Each run prints `Key: <source>` on stderr.
+- **Note:** this targets Grok's Imagine endpoint — not an officially documented public API. It can change upstream, and image generation is **billed to the xAI account** behind the credential the `Key:` line names.
 
 ```bash
 python3 <skill-dir>/grok_image.py "a minimal isometric server room, blue accent" --out ./assets/hero.jpg
@@ -52,8 +52,8 @@ python3 <skill-dir>/grok_image.py "a minimal isometric server room, blue accent"
 
 Generates videos with `grok-imagine-video-1.5` / `grok-imagine-video` and saves a local MP4, printing a `MEDIA:<path>` line for native delivery/embedding. Also supports **image-to-video** via `--image`.
 
-- **Requires:** the [`grok` CLI](https://github.com/superagent-ai/grok-cli) logged in (it stores an xAI OAuth token at `~/.grok/auth.json`, which the skill reads fresh each call), plus `python3`.
-- **Note:** this targets Grok's Imagine endpoint via the grok CLI's OAuth session — not an officially documented public API. It can change upstream, and video generation is **billed to the xAI account** behind that token. Generation is asynchronous (submit → poll → download).
+- **Requires:** the [`grok` CLI](https://github.com/superagent-ai/grok-cli) logged in (`~/.grok/auth.json`, read fresh each call; it must stay valid for `--max-wait` + `--timeout` + 60 s, 13 minutes by default, else a key is preferred) **or** an xAI API key (`XAI_API_KEY` or `GROK_API_KEY` in the environment, or in `~/.omp/.env`), plus `python3` 3.9+. Each run prints `Key: <source>` on stderr.
+- **Note:** this targets Grok's Imagine endpoint — not an officially documented public API. It can change upstream, and video generation is **billed to the xAI account** behind the credential the `Key:` line names. Generation is asynchronous (submit → poll → download).
 
 ```bash
 python3 <skill-dir>/grok_video.py "A red apple rolling across a wooden table, soft light" \

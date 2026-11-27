@@ -55,3 +55,7 @@ fingerprints:
   rule_id: PE3
   file: grok-tts/grok_tts.py
   reason: "Intended: reads the xAI key from ~/.omp/.env or the grok CLI login store (~/.grok/auth.json); the key is sent only to api.x.ai and is never printed, logged or written."
+- hash: sha256:7bea1b81d5970618
+  rule_id: AST4
+  file: grok-tts/grok_tts.py
+  reason: "Intended: the optional ffprobe MP3 duration check in check_mp3. Argv list, no shell, run only on a temp copy of the audio the API returned."

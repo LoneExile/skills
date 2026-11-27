@@ -63,6 +63,22 @@ class KeyLookupTests(unittest.TestCase):
         self.assertEqual(self.resolve(home),
                          ("g1", "~/.omp/.env (GROK_API_KEY)", None))
 
+    def test_key_source_precedence(self):
+        home = self.home()
+        write_dotenv(home, "XAI_API_KEY=k-dot-x\nGROK_API_KEY=k-dot-g\n")
+        env = {"XAI_API_KEY": "k-env-x", "GROK_API_KEY": "k-env-g"}
+        self.assertEqual(self.resolve(home, env),
+                         ("k-env-x", "XAI_API_KEY (environment)", None))
+        del env["XAI_API_KEY"]
+        self.assertEqual(self.resolve(home, env),
+                         ("k-env-g", "GROK_API_KEY (environment)", None))
+        del env["GROK_API_KEY"]
+        self.assertEqual(self.resolve(home, env),
+                         ("k-dot-x", "~/.omp/.env (XAI_API_KEY)", None))
+        write_dotenv(home, "GROK_API_KEY=k-dot-g\n")
+        self.assertEqual(self.resolve(home, env),
+                         ("k-dot-g", "~/.omp/.env (GROK_API_KEY)", None))
+
     def test_nothing_found_lists_sources(self):
         home = self.home()
         write_login(home, [("k-old", iso(-60))])

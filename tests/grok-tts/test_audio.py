@@ -110,3 +110,13 @@ class AtomicWriteTest(unittest.TestCase):
             with self.assertRaises(OSError):
                 grok_tts.atomic_write_many([(self.a, b"x-a"), (self.b, b"x-b")])
         user_files_intact()
+
+class NoteHelperTest(unittest.TestCase):
+    def test_notes_collect_on_exceptions_and_on_objects_without_add_note(self):
+        exc = OSError("x")
+        grok_tts._add_note(exc, "one"); grok_tts._add_note(exc, "two")
+        self.assertEqual(exc.__notes__, ["one", "two"])
+        class Bare: pass  # no add_note, as on Python before 3.11
+        bare = Bare()
+        grok_tts._add_note(bare, "one"); grok_tts._add_note(bare, "two")
+        self.assertEqual(bare.__notes__, ["one", "two"])

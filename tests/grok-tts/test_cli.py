@@ -1,11 +1,13 @@
 import contextlib
 import io
 import json
+import os
 import shutil
 import tempfile
 import unittest
 import wave
 from pathlib import Path
+from unittest import mock
 
 from helpers import StubServer, err, grok_tts, tts_ok
 
@@ -167,6 +169,29 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertFalse(a.exists())
         self.assertEqual(list(self.out.glob("*.part")), [])
+
+    def test_failed_restore_is_reported_with_the_snapshot_name(self):
+        a, j = self.out / "a.wav", self.out / "a.json"
+        a.write_bytes(b"old-a")
+        j.write_bytes(b"old-b")
+        real = os.replace
+
+        def fake(src, dst):
+            if Path(dst) == j:
+                raise OSError("boom")
+            real(src, dst)
+
+        with mock.patch.object(grok_tts.os, "replace", side_effect=fake), \
+                mock.patch.object(grok_tts.shutil, "move",
+                                  side_effect=OSError("restore failed")):
+            code, _, e, _ = self.run_cli(
+                ["Hi there", "-o", str(a), "--words", str(j)], [tts_ok()])
+        self.assertEqual(code, 1)
+        self.assertIn("ERROR: boom", e)
+        holders = [p for p in self.out.iterdir()
+                   if p != a and p.read_bytes() == b"old-a"]
+        self.assertTrue(holders)
+        self.assertTrue(any(str(p) in e for p in holders), e)
 
 
 if __name__ == "__main__":

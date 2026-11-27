@@ -7,6 +7,8 @@ Stdlib-only (urllib) -- no `requests` and no third-party packages.
 
 This module has no side effects at import time: no network, no file access.
 """
+from __future__ import annotations
+
 import argparse
 import base64
 import binascii
@@ -182,6 +184,19 @@ def check_mp3(data: bytes, expected_duration: float, ffprobe: str | None) -> Non
         )
 
 
+def _add_note(exc: BaseException, note: str) -> None:
+    """Attach a note to an exception. `add_note` exists only from Python 3.11."""
+    add = getattr(exc, "add_note", None)
+    if add is not None:
+        add(note)
+        return
+    notes = getattr(exc, "__notes__", None)
+    if not isinstance(notes, list):
+        notes = []
+        exc.__notes__ = notes
+    notes.append(note)
+
+
 def atomic_write_many(items: list) -> None:
     """Write all files via .part files, then replace each destination.
 
@@ -227,9 +242,10 @@ def atomic_write_many(items: list) -> None:
                     dest.unlink(missing_ok=True)
             except OSError as restore_err:
                 kept.add(bak)
-                exc.add_note(
+                _add_note(
+                    exc,
                     f"could not restore {dest} ({restore_err}); "
-                    f"its previous content is kept in {bak}"
+                    f"its previous content is kept in {bak}",
                 )
         for p in parts + baks:
             if p not in kept:
@@ -272,8 +288,11 @@ def _grok_login_key(path: Path, now: datetime) -> tuple[str | None, str]:
         if not isinstance(key, str) or not key:
             continue
         written = entry.get("expires_at")
+        stamp = written
+        if isinstance(written, str) and written.endswith("Z"):
+            stamp = written[:-1] + "+00:00"  # fromisoformat reads Z only from Python 3.11
         try:
-            expires = datetime.fromisoformat(written)
+            expires = datetime.fromisoformat(stamp)
         except (TypeError, ValueError):
             return key, ""  # missing or unparseable expiry counts as usable
         if expires.tzinfo is None:
@@ -751,6 +770,13 @@ def _run(args, *, api_base, env, home, now, sleep, rand) -> int:
     return 0
 
 
+def _report(exc: BaseException) -> None:
+    """Print `ERROR: <message>`, then each note attached to the exception."""
+    print(f"ERROR: {exc}", file=sys.stderr)
+    for note in getattr(exc, "__notes__", ()):
+        print(note, file=sys.stderr)
+
+
 def main(argv: list | None = None, *, api_base: str = API_BASE,
          env: Mapping | None = None, home: Path | None = None,
          now: datetime | None = None, sleep=time.sleep,
@@ -763,10 +789,10 @@ def main(argv: list | None = None, *, api_base: str = API_BASE,
         return _run(args, api_base=api_base, env=env, home=home, now=now,
                     sleep=sleep, rand=rand)
     except GrokTTSError as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
+        _report(exc)
         return exc.exit_code
     except OSError as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
+        _report(exc)
         return 1
 
 

@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="408" viewBox="0 0 960 408" role="img" aria-labelledby="title desc">
+  <title id="title">What each skill takes and makes</title>
+  <desc id="desc">grok-image: a text prompt in, an image file out. grok-video: a prompt, a start image or both in, an MP4 clip of 1 to 15 seconds out. grok-tts: text or a script of scenes in, a WAV or MP3 voiceover with the time of every word out. highlighted-source-reference-cards: web pages or PDF pages and the lines to prove in, one PNG card per source with those lines highlighted in pink out. terminal-demo-video: a command and the keys to press in, a looping GIF and MP4 of the real terminal out.</desc>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif; }
+    .frame { fill: #f6f8fa; stroke: #d1d9e0; }
+    .card { fill: #ffffff; stroke: #d1d9e0; }
+    .pill { fill: #f6f8fa; stroke-width: 1.5; }
+    .cap { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; fill: #59636e; }
+    .body { font-size: 14.5px; fill: #1f2328; }
+    .note { font-size: 13px; fill: #59636e; }
+    .name { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; font-size: 14px; font-weight: 600; }
+    .wire { stroke: #818b98; stroke-width: 2; fill: none; }
+    .tip { fill: #818b98; }
+    .icon { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .hl { stroke: none; fill-opacity: 0.35; }
+    .f-blue { fill: #0969da; } .f-purple { fill: #8250df; } .f-orange { fill: #bc4c00; } .f-pink { fill: #bf3989; } .f-green { fill: #1a7f37; }
+    .s-blue { stroke: #0969da; } .s-purple { stroke: #8250df; } .s-orange { stroke: #bc4c00; } .s-pink { stroke: #bf3989; } .s-green { stroke: #1a7f37; }
+    @media (prefers-color-scheme: dark) {
+      .frame { fill: #151b23; stroke: #3d444d; }
+      .card { fill: #0d1117; stroke: #3d444d; }
+      .pill { fill: #151b23; }
+      .cap, .note { fill: #9198a1; }
+      .body { fill: #f0f6fc; }
+      .wire { stroke: #656c76; }
+      .tip { fill: #656c76; }
+      .f-blue { fill: #4493f8; } .f-purple { fill: #ab7df8; } .f-orange { fill: #db6d28; } .f-pink { fill: #db61a2; } .f-green { fill: #3fb950; }
+      .s-blue { stroke: #4493f8; } .s-purple { stroke: #ab7df8; } .s-orange { stroke: #db6d28; } .s-pink { stroke: #db61a2; } .s-green { stroke: #3fb950; }
+    }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path class="tip" d="M0 0 L10 5 L0 10 Z"/>
+    </marker>
+  </defs>
+
+  <rect class="frame" x="0.5" y="0.5" width="959" height="407" rx="14"/>
+
+  <text class="cap" x="48" y="40">YOU GIVE</text>
+  <text class="cap" x="490" y="40" text-anchor="middle">SKILL</text>
+  <text class="cap" x="724" y="40">YOU GET</text>
+
+  <!-- grok-image -->
+  <rect class="card" x="24" y="56" width="912" height="60" rx="10"/>
+  <text class="body" x="48" y="91">A text prompt</text>
+  <line class="wire" x1="304" y1="86" x2="322" y2="86" marker-end="url(#arrow)"/>
+  <rect class="pill s-blue" x="330" y="69" width="320" height="34" rx="17"/>
+  <text class="name f-blue" x="490" y="91" text-anchor="middle">grok-image</text>
+  <line class="wire" x1="656" y1="86" x2="674" y2="86" marker-end="url(#arrow)"/>
+  <g class="icon s-blue" transform="translate(684 73)">
+    <rect x="2" y="4" width="22" height="18" rx="3"/>
+    <circle cx="9" cy="10" r="2"/>
+    <polyline points="4,20 11,13 15,17 18,14 23,19"/>
+  </g>
+  <text class="body" x="724" y="83">An image file</text>
+  <text class="note" x="724" y="101">a JPG, by default</text>
+
+  <!-- grok-video -->
+  <rect class="card" x="24" y="124" width="912" height="60" rx="10"/>
+  <text class="body" x="48" y="159">A prompt, a start image, or both</text>
+  <line class="wire" x1="304" y1="154" x2="322" y2="154" marker-end="url(#arrow)"/>
+  <rect class="pill s-purple" x="330" y="137" width="320" height="34" rx="17"/>
+  <text class="name f-purple" x="490" y="159" text-anchor="middle">grok-video</text>
+  <line class="wire" x1="656" y1="154" x2="674" y2="154" marker-end="url(#arrow)"/>
+  <g class="icon s-purple" transform="translate(684 141)">
+    <rect x="2" y="7" width="15" height="13" rx="2"/>
+    <polygon points="17,11 24,7.5 24,19.5 17,16"/>
+  </g>
+  <text class="body" x="724" y="151">An MP4 clip</text>
+  <text class="note" x="724" y="169">1 to 15 seconds</text>
+
+  <!-- grok-tts -->
+  <rect class="card" x="24" y="192" width="912" height="60" rx="10"/>
+  <text class="body" x="48" y="227">Text, or a script of scenes</text>
+  <line class="wire" x1="304" y1="222" x2="322" y2="222" marker-end="url(#arrow)"/>
+  <rect class="pill s-orange" x="330" y="205" width="320" height="34" rx="17"/>
+  <text class="name f-orange" x="490" y="227" text-anchor="middle">grok-tts</text>
+  <line class="wire" x1="656" y1="222" x2="674" y2="222" marker-end="url(#arrow)"/>
+  <g class="icon s-orange" transform="translate(684 209)">
+    <line x1="3" y1="11" x2="3" y2="15"/>
+    <line x1="7.5" y1="7" x2="7.5" y2="19"/>
+    <line x1="12" y1="3" x2="12" y2="23"/>
+    <line x1="16.5" y1="8" x2="16.5" y2="18"/>
+    <line x1="21" y1="11" x2="21" y2="15"/>
+  </g>
+  <text class="body" x="724" y="219">A voiceover, WAV or MP3</text>
+  <text class="note" x="724" y="237">plus the time of every word</text>
+
+  <!-- highlighted-source-reference-cards -->
+  <rect class="card" x="24" y="260" width="912" height="60" rx="10"/>
+  <text class="body" x="48" y="286">Web pages or PDF pages,</text>
+  <text class="body" x="48" y="304">and the lines to prove</text>
+  <line class="wire" x1="304" y1="290" x2="322" y2="290" marker-end="url(#arrow)"/>
+  <rect class="pill s-pink" x="330" y="273" width="320" height="34" rx="17"/>
+  <text class="name f-pink" x="490" y="295" text-anchor="middle">highlighted-source-reference-cards</text>
+  <line class="wire" x1="656" y1="290" x2="674" y2="290" marker-end="url(#arrow)"/>
+  <g class="icon s-pink" transform="translate(684 277)">
+    <rect x="4" y="2" width="18" height="22" rx="2"/>
+    <line x1="8" y1="7" x2="18" y2="7"/>
+    <rect class="hl f-pink" x="7" y="11" width="12" height="5" rx="1"/>
+    <line x1="8" y1="20" x2="16" y2="20"/>
+  </g>
+  <text class="body" x="724" y="287">A PNG card per source</text>
+  <text class="note" x="724" y="305">with the lines in pink</text>
+
+  <!-- terminal-demo-video -->
+  <rect class="card" x="24" y="328" width="912" height="60" rx="10"/>
+  <text class="body" x="48" y="363">A command and the keys to press</text>
+  <line class="wire" x1="304" y1="358" x2="322" y2="358" marker-end="url(#arrow)"/>
+  <rect class="pill s-green" x="330" y="341" width="320" height="34" rx="17"/>
+  <text class="name f-green" x="490" y="363" text-anchor="middle">terminal-demo-video</text>
+  <line class="wire" x1="656" y1="358" x2="674" y2="358" marker-end="url(#arrow)"/>
+  <g class="icon s-green" transform="translate(684 345)">
+    <rect x="2" y="4" width="22" height="18" rx="3"/>
+    <polyline points="7,10 10,13 7,16"/>
+    <line x1="12" y1="16" x2="18" y2="16"/>
+  </g>
+  <text class="body" x="724" y="355">A looping GIF and MP4</text>
+  <text class="note" x="724" y="373">of the real terminal</text>
+</svg>

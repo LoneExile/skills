@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="516" viewBox="0 0 960 516" role="img" aria-labelledby="title desc">
+  <title id="title">Where the Grok skills look for your xAI credential</title>
+  <desc id="desc">grok-image and grok-video check, in order: 1. the grok CLI login, used only if it stays valid for the whole run; 2. XAI_API_KEY from the environment; 3. GROK_API_KEY from the environment; 4. ~/.omp/.env, an XAI_API_KEY line, then a GROK_API_KEY line; 5. as a last resort, a login about to expire, used with a note when no key exists. grok-tts checks, in order: 1. XAI_API_KEY from the environment; 2. GROK_API_KEY from the environment; 3. ~/.omp/.env; 4. the grok CLI login, while it has not expired. The first match wins. Each run prints Key: and the source on stderr, and that account pays. A rejected credential stops the run; the next source is never tried.</desc>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif; }
+    .frame { fill: #f6f8fa; stroke: #d1d9e0; }
+    .card { fill: #ffffff; stroke: #d1d9e0; }
+    .step { fill: #ffffff; stroke-width: 1.5; }
+    .dash { stroke-dasharray: 6 5; }
+    .hm { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; font-size: 15px; font-weight: 600; fill: #1f2328; }
+    .lbl { font-size: 15px; font-weight: 600; fill: #1f2328; }
+    .lblm { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; font-size: 14.5px; font-weight: 600; fill: #1f2328; }
+    .body { font-size: 14.5px; fill: #1f2328; }
+    .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; font-size: 14px; }
+    .note { font-size: 13px; fill: #59636e; }
+    .num { font-size: 13px; font-weight: 700; fill: #ffffff; }
+    .f-blue { fill: #0969da; } .f-purple { fill: #8250df; } .f-green { fill: #1a7f37; }
+    .s-blue { stroke: #0969da; } .s-purple { stroke: #8250df; } .s-green { stroke: #1a7f37; }
+    @media (prefers-color-scheme: dark) {
+      .frame { fill: #151b23; stroke: #3d444d; }
+      .card { fill: #0d1117; stroke: #3d444d; }
+      .step { fill: #0d1117; }
+      .hm, .lbl, .lblm, .body { fill: #f0f6fc; }
+      .note { fill: #9198a1; }
+      .num { fill: #0d1117; }
+      .f-blue { fill: #4493f8; } .f-purple { fill: #ab7df8; } .f-green { fill: #3fb950; }
+      .s-blue { stroke: #4493f8; } .s-purple { stroke: #ab7df8; } .s-green { stroke: #3fb950; }
+    }
+  </style>
+
+  <rect class="frame" x="0.5" y="0.5" width="959" height="515" rx="14"/>
+
+  <!-- grok-image and grok-video -->
+  <text class="hm" x="40" y="44">grok-image · grok-video</text>
+  <text class="note" x="40" y="64">The login first, if it lasts the whole run</text>
+
+  <rect class="step s-purple" x="40" y="84" width="412" height="54" rx="10"/>
+  <circle class="f-purple" cx="68" cy="111" r="12"/>
+  <text class="num" x="68" y="115.5" text-anchor="middle">1</text>
+  <text class="lbl" x="92" y="107">grok CLI login</text>
+  <text class="note" x="92" y="126">used only if it stays valid for the whole run</text>
+
+  <rect class="step s-blue" x="40" y="150" width="412" height="54" rx="10"/>
+  <circle class="f-blue" cx="68" cy="177" r="12"/>
+  <text class="num" x="68" y="181.5" text-anchor="middle">2</text>
+  <text class="lblm" x="92" y="173">XAI_API_KEY</text>
+  <text class="note" x="92" y="192">from the environment</text>
+
+  <rect class="step s-blue" x="40" y="216" width="412" height="54" rx="10"/>
+  <circle class="f-blue" cx="68" cy="243" r="12"/>
+  <text class="num" x="68" y="247.5" text-anchor="middle">3</text>
+  <text class="lblm" x="92" y="239">GROK_API_KEY</text>
+  <text class="note" x="92" y="258">from the environment</text>
+
+  <rect class="step s-green" x="40" y="282" width="412" height="54" rx="10"/>
+  <circle class="f-green" cx="68" cy="309" r="12"/>
+  <text class="num" x="68" y="313.5" text-anchor="middle">4</text>
+  <text class="lblm" x="92" y="305">~/.omp/.env</text>
+  <text class="note" x="92" y="324">an XAI_API_KEY line, then a GROK_API_KEY line</text>
+
+  <rect class="step s-purple dash" x="40" y="348" width="412" height="54" rx="10"/>
+  <circle class="f-purple" cx="68" cy="375" r="12"/>
+  <text class="num" x="68" y="379.5" text-anchor="middle">5</text>
+  <text class="lbl" x="92" y="371">a login about to expire</text>
+  <text class="note" x="92" y="390">last resort: used, with a note, when no key exists</text>
+
+  <!-- grok-tts -->
+  <text class="hm" x="508" y="44">grok-tts</text>
+  <text class="note" x="508" y="64">A key first, the login last</text>
+
+  <rect class="step s-blue" x="508" y="84" width="412" height="54" rx="10"/>
+  <circle class="f-blue" cx="536" cy="111" r="12"/>
+  <text class="num" x="536" y="115.5" text-anchor="middle">1</text>
+  <text class="lblm" x="560" y="107">XAI_API_KEY</text>
+  <text class="note" x="560" y="126">from the environment</text>
+
+  <rect class="step s-blue" x="508" y="150" width="412" height="54" rx="10"/>
+  <circle class="f-blue" cx="536" cy="177" r="12"/>
+  <text class="num" x="536" y="181.5" text-anchor="middle">2</text>
+  <text class="lblm" x="560" y="173">GROK_API_KEY</text>
+  <text class="note" x="560" y="192">from the environment</text>
+
+  <rect class="step s-green" x="508" y="216" width="412" height="54" rx="10"/>
+  <circle class="f-green" cx="536" cy="243" r="12"/>
+  <text class="num" x="536" y="247.5" text-anchor="middle">3</text>
+  <text class="lblm" x="560" y="239">~/.omp/.env</text>
+  <text class="note" x="560" y="258">an XAI_API_KEY line, then a GROK_API_KEY line</text>
+
+  <rect class="step s-purple" x="508" y="282" width="412" height="54" rx="10"/>
+  <circle class="f-purple" cx="536" cy="309" r="12"/>
+  <text class="num" x="536" y="313.5" text-anchor="middle">4</text>
+  <text class="lbl" x="560" y="305">grok CLI login</text>
+  <text class="note" x="560" y="324">used while it hasn't expired</text>
+
+  <!-- rules for both -->
+  <rect class="card" x="24" y="422" width="912" height="74" rx="10"/>
+  <text class="body" x="48" y="452">First match wins. Each run prints <tspan class="mono">Key: &lt;source&gt;</tspan> on stderr, and that account pays.</text>
+  <text class="body" x="48" y="478">A rejected credential stops the run: the next source is never tried.</text>
+</svg>

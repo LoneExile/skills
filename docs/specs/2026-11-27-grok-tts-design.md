@@ -1,6 +1,6 @@
 # grok-tts skill: design
 
-Date: 2026-11-27 · Status: draft for approval · Repo: `LoneExile/skills`
+Date: 2026-11-27 · Status: approved; revised after the final review · Repo: `LoneExile/skills`
 
 ## Intent
 
@@ -47,9 +47,10 @@ Any of these is a failure even if a video comes out:
 
 ## Constraints
 
-- Stdlib-only Python 3, like `grok-image` and `grok-video`. CI runs Python 3.12;
-  the owner runs 3.14. No ffmpeg inside the skill (`media-use` itself needs
-  ffmpeg for its conversion; the owner has 9.0.2).
+- Stdlib-only Python 3.9 or newer, like `grok-image` and `grok-video` (macOS's
+  stock `python3` is 3.9.6). CI runs the suite on 3.12 and 3.9; the owner runs
+  3.14. No ffmpeg inside the skill (`media-use` itself needs ffmpeg for its
+  conversion; the owner has 9.0.2).
 - Repo CI (`.github/workflows/validate.yml`): `npx -y skills add . --list`
   validates frontmatter; `python3 -m py_compile skills/**/*.py`. SkillSpector
   scans `./skills` against `.skillspector-baseline.yaml` (reviewed findings only).
@@ -96,7 +97,8 @@ Read from `media-use` source on `main`, 2026-11-27 (`audio/scripts/audio.mjs`,
   means no transcription; empty or absent means the engine transcribes.
 - The engine converts each recording with ffmpeg to 44.1 kHz mono at its own
   voice path (`assets/voice/<id>.wav`, or `-2` when that name is taken). Source
-  takes therefore must not live at that path.
+  takes therefore must not live at that path: measured on the real engine, a take
+  there makes it exit 0 and leave the line out.
 - The request's `speed` time-stretches recordings, so it must stay 1 when
   `grok-tts` already applied the speed.
 - A request where every line is a recording uses provider `recording`: no HeyGen
@@ -133,20 +135,26 @@ Batch:   python3 grok_tts.py [options] --lines SCRIPT.json [--out-dir voiceover]
 Voices:  python3 grok_tts.py --list
 ```
 
-- `TEXT_OR_FILE`: an existing file is read as UTF-8; anything else is the text.
+- `TEXT_OR_FILE`: an existing file is read as UTF-8 (a leading BOM is dropped; a
+  file that is not UTF-8 is refused with exit 2); anything else is the text.
   `--` ends options, for text that starts with `-`.
 - `SCRIPT.json`: `[{"id": "intro", "text": "…"}, …]`.
 - Batch writes `<out-dir>/<id>.wav` and `<out-dir>/<id>.words.json` for each line,
   then `<out-dir>/lines.json`:
   `[{"id": "intro", "audio": "voiceover/intro.wav", "words": [...]}, …]`.
   `audio` is relative to `--project` with forward slashes. `--out-dir` must be
-  inside `--project`. Batch always writes WAV.
+  inside `--project` and must not be `<project>/assets/voice`. Batch always
+  writes WAV.
+- Missing output folders are created before any request. In single mode `-o`
+  and `--words` must name different files.
 - Options: `--voice` (default `eve`; custom voice ids allowed), `--lang` (default
   `en`), `--speed` (default `1.0`), `--normalize` (sends `text_normalization`),
   `--no-cache`, `--timeout` (default 300 s).
 - Output. Single: `Audio saved to: <abs path>`, `MEDIA:<abs path>`, plus
   `Words saved to: <abs path>` with `--words`. Batch: one line per id
   (marked `(cached)` when no API call was made), then `Lines saved to: <abs path>`.
+  A run that uses a key prints `Key: <source label>` on stderr; warnings go to
+  stderr as `WARNING: …`.
 - Exit codes: 0 success; 2 bad input, detected before any API call; 1 API,
   network, key or file failure.
 
@@ -162,11 +170,14 @@ Voices:  python3 grok_tts.py --list
 
 - Text is non-empty after trimming and at most 60,000 characters.
 - Speed is within 0.7–1.5.
+- `--timeout` is a finite number above 0.
 - Language is `auto` or BCP-47-shaped (`^[A-Za-z]{2,3}(-[A-Za-z]{2,4})?$`). A
   well-formed code missing from xAI's documented list prints a warning and
   continues: the API accepts any code silently, and the docs say other languages
   "may work". A typo like `english` is refused.
-- Batch ids are valid file names and unique; the output extension is `.wav` or `.mp3`.
+- Batch ids are valid file names (no control characters, at most 200 UTF-8
+  bytes) and unique ignoring case and Unicode form; the output extension is
+  `.wav` or `.mp3`.
 - Text that has no words left once speech tags are removed (for example only
   `[laugh]`) is refused. Its word list would be empty, and `media-use` would
   then transcribe the file and could invent words.
@@ -181,6 +192,8 @@ The first source that holds a key wins:
 2. environment `GROK_API_KEY`
 3. `~/.omp/.env`: the `XAI_API_KEY` line, then the `GROK_API_KEY` line. Dotenv
    rules: optional `export `, optional matching quotes, nothing else is read.
+   When a name appears more than once the last line wins, as in OMP's own
+   parser; the file is read as UTF-8 with a BOM dropped and bad bytes replaced.
 4. the grok CLI login `~/.grok/auth.json`: an entry with `key` whose
    `expires_at` is still in the future
 
@@ -212,10 +225,15 @@ JSON `error` field only.
 - **MP3:** must start with `ID3` or an MPEG frame sync. If ffprobe is on PATH,
   its duration must be within 0.1 s of `duration`; without ffprobe that check
   is skipped.
-- **Atomic writes:** write `<dest>.part`, then `os.replace`. Audio and words land
-  together or not at all; leftover `.part` files are removed on failure. Batch
-  writes `lines.json` only when every line succeeded. Lines that succeeded stay
-  on disk and in the cache, so a re-run pays only for the failed ones.
+- **Response shape:** `duration` must be a finite number above 0 and the word
+  list must not be empty; otherwise the run fails as an API error. Both length
+  checks fail closed, so a NaN never passes.
+- **Atomic writes:** write `<dest>.<tag>.part`, then `os.replace`. Audio and words
+  land together or not at all; on failure every replaced file is restored and
+  leftover work files are removed. Batch removes an old `lines.json` before its
+  first request and writes a new one only when every line succeeded. Lines that
+  succeeded stay on disk and in the cache, so a re-run pays only for the failed
+  ones.
 
 ### Word timings
 
@@ -241,7 +259,10 @@ JSON `error` field only.
 
 - Key: sha256 of canonical JSON `{text, voice (lowercase), lang (lowercase), speed, normalize, format, "v": 1}`.
 - Entries: `<hash>.<ext>` and `<hash>.words.json` under
-  `${XDG_CACHE_HOME:-~/.cache}/grok-tts/`, written atomically.
+  `${XDG_CACHE_HOME:-~/.cache}/grok-tts/`, written atomically and before the
+  output files, so a failed output write re-runs free.
+- The cache is best effort: when it cannot be written the run prints
+  `WARNING: cache not updated (…)` and does not fail.
 - A hit copies the files into place with no API call. `--no-cache` skips the
   read but still refreshes the entry.
 
@@ -294,6 +315,11 @@ Each can be overridden.
    adds later shows up in captions until the list is updated.
 10. Text with nothing to say once tags are removed is refused before the API
     call, so captions never fall back to transcription.
+11. The minimum Python is 3.9, not 3.11, because macOS's stock `python3` is 3.9.6.
+12. `~/.omp/.env` follows OMP's parsing (last line wins), and stderr names the
+    key source of each paid run, so a fall-through to the grok login is visible.
+13. Batch refuses `--out-dir` at `<project>/assets/voice`, where `media-use`
+    would drop the lines.
 
 ## Left to the builder
 

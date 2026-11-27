@@ -76,6 +76,7 @@ class GenerateVideoTests(unittest.TestCase):
         write_login(self.tmp, [("k-login-abcdef", iso(3600))])
         srv = self.stub([err("expired_oauth")])
         result, stdout, stderr = self.run_gen(srv, {"XAI_API_KEY": "k-env"})
+        self.assertEqual(stdout, "")
         self.assertIsNone(result)
         self.assertEqual(len(srv.requests), 1)
         self.assertIn(
@@ -100,7 +101,7 @@ class GenerateVideoTests(unittest.TestCase):
     def test_poll_error_redacted(self):
         key = "K-SECRET-0123456789"
         srv = self.stub([SUBMIT, (500, {}, b"boom " + key.encode())])
-        result, _, stderr = self.run_gen(srv, {"XAI_API_KEY": key})
+        result, stdout, stderr = self.run_gen(srv, {"XAI_API_KEY": key})
         self.assertIsNone(result)
         self.assertIn("ERROR: poll HTTP 500", stderr)
         self.assertIn("[redacted]", stderr)
@@ -109,7 +110,7 @@ class GenerateVideoTests(unittest.TestCase):
     def test_login_short_for_polling_passed_over(self):
         write_login(self.tmp, [("k-short", iso(300))])
         srv = self.stub(self.success)
-        result, _, stderr = self.run_gen(srv, {"XAI_API_KEY": "k-env"})
+        result, stdout, stderr = self.run_gen(srv, {"XAI_API_KEY": "k-env"})
         self.assertIsNotNone(result)
         for request in srv.requests[:3]:
             self.assertEqual(request[2]["Authorization"], "Bearer k-env")
@@ -127,7 +128,8 @@ class GenerateVideoTests(unittest.TestCase):
 
     def test_unusable_key_refused_before_request(self):
         srv = self.stub([])
-        result, _, stderr = self.run_gen(srv, {"XAI_API_KEY": "k\nbad"})
+        result, stdout, stderr = self.run_gen(srv, {"XAI_API_KEY": "k\nbad"})
+        self.assertEqual(stdout, "")
         self.assertIsNone(result)
         self.assertEqual(srv.requests, [])
         self.assertIn(
@@ -137,13 +139,15 @@ class GenerateVideoTests(unittest.TestCase):
 
     def test_redirect_not_followed(self):
         srv = self.stub(lambda srv: [(302, {"Location": srv.url + "/x"}, b"{}")])
-        result, _, stderr = self.run_gen(srv, {"XAI_API_KEY": "k-env"})
+        result, stdout, stderr = self.run_gen(srv, {"XAI_API_KEY": "k-env"})
+        self.assertEqual(stdout, "")
         self.assertIsNone(result)
         self.assertEqual(len(srv.requests), 1)
 
     def test_other_400_is_not_a_rejection(self):
         srv = self.stub([(400, {}, b'{"error":"Argument not supported: size"}')])
-        result, _, stderr = self.run_gen(srv, {"XAI_API_KEY": "k-env"})
+        result, stdout, stderr = self.run_gen(srv, {"XAI_API_KEY": "k-env"})
+        self.assertEqual(stdout, "")
         self.assertIsNone(result)
         self.assertEqual(len(srv.requests), 1)
         self.assertIn("ERROR: xAI API HTTP 400", stderr)
@@ -152,7 +156,8 @@ class GenerateVideoTests(unittest.TestCase):
 
     def test_401_is_a_rejection(self):
         srv = self.stub([(401, {}, b'{"error":"unauthorized"}')])
-        result, _, stderr = self.run_gen(srv, {"XAI_API_KEY": "k-env"})
+        result, stdout, stderr = self.run_gen(srv, {"XAI_API_KEY": "k-env"})
+        self.assertEqual(stdout, "")
         self.assertIsNone(result)
         self.assertEqual(len(srv.requests), 1)
         self.assertIn(
@@ -175,7 +180,8 @@ class GenerateVideoTests(unittest.TestCase):
     def test_unexpected_response_redacted(self):
         key = "K-SECRET-0123456789"
         srv = self.stub([(200, {}, json.dumps("x" * 384 + key).encode())])
-        result, _, stderr = self.run_gen(srv, {"XAI_API_KEY": key})
+        result, stdout, stderr = self.run_gen(srv, {"XAI_API_KEY": key})
+        self.assertEqual(stdout, "")
         self.assertIsNone(result)
         self.assertIn("unexpected API response", stderr)
         self.assertIn("[redacted]", stderr)
@@ -186,7 +192,8 @@ class GenerateVideoTests(unittest.TestCase):
         (self.tmp / "afile").write_text("x")
         self.out = self.tmp / "afile" / "v.mp4"
         srv = self.stub(self.success)
-        result, _, stderr = self.run_gen(srv, {"XAI_API_KEY": "k-env"})
+        result, stdout, stderr = self.run_gen(srv, {"XAI_API_KEY": "k-env"})
+        self.assertEqual(stdout, "")
         self.assertIsNone(result)
         self.assertEqual(len(srv.requests), 0)
         self.assertIn("ERROR: cannot write the output:", stderr)
@@ -194,10 +201,70 @@ class GenerateVideoTests(unittest.TestCase):
     def test_video_margin_includes_max_wait(self):
         write_login(self.tmp, [("k-login", iso(700))])
         srv = self.stub(self.success)
-        result, _, stderr = self.run_gen(srv, {"XAI_API_KEY": "k-env"})
+        result, stdout, stderr = self.run_gen(srv, {"XAI_API_KEY": "k-env"})
         self.assertIsNotNone(result)
         self.assertEqual(srv.requests[0][2]["Authorization"], "Bearer k-env")
         self.assertIn("too soon for this run", stderr)
+
+    def poll_stub(self, *bodies):
+        return self.stub([SUBMIT] + [(200, {}, b) for b in bodies])
+
+    def test_failed_with_non_dict_error_does_not_raise(self):
+        srv = self.poll_stub(b'{"status":"failed","error":"boom"}')
+        result, _, stderr = self.run_gen(srv, {"XAI_API_KEY": "k-env"})
+        self.assertIsNone(result)
+        self.assertIn("ERROR: generation failed", stderr)
+        self.assertIn("boom", stderr)
+
+    def test_done_with_non_dict_video_does_not_raise(self):
+        srv = self.poll_stub(b'{"status":"done","video":"x"}')
+        result, _, stderr = self.run_gen(srv, {"XAI_API_KEY": "k-env"})
+        self.assertIsNone(result)
+        self.assertIn("ERROR: done but no video url", stderr)
+
+    def test_non_object_poll_body_counts_as_pending(self):
+        srv = self.stub([SUBMIT] + [(200, {}, b"[]")] * 3)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            result = grok_video.generate_video(
+                "a cat", out=self.out, env={"XAI_API_KEY": "k-env"}, home=self.tmp,
+                now=NOW, max_wait=15, poll_interval=5,
+                api_url=srv.url + "/v1/videos/generations",
+                status_url=srv.url + "/v1/videos/{request_id}",
+                sleep=self.sleeps.append)
+        self.assertIsNone(result)
+        self.assertEqual(self.sleeps, [5, 5, 5])
+        self.assertIn("ERROR: timed out after 15s", stderr.getvalue())
+
+    def test_every_printed_server_text_is_redacted(self):
+        key = "K-SECRET-0123456789"
+        body = ("echo " + key).encode()
+        cases = {
+            "submit 403": [(403, {}, body)],
+            "poll 403": [SUBMIT, (403, {}, body)],
+            "failed message": [SUBMIT, (200, {}, json.dumps(
+                {"status": "failed", "error": {"code": "x", "message": key}}).encode())],
+            "done no url": [SUBMIT, (200, {}, json.dumps(
+                {"status": "done", "note": key}).encode())],
+            "unknown status": [SUBMIT, (200, {}, json.dumps({"status": key}).encode())],
+        }
+        for name, responses in cases.items():
+            with self.subTest(name):
+                srv = self.stub(responses)
+                result, _, stderr = self.run_gen(srv, {"XAI_API_KEY": key})
+                self.assertIsNone(result)
+                self.assertIn("[redacted]", stderr)
+                self.assertNotIn("K-SECRET", stderr)
+                self.assertNotIn("0123456789", stderr)
+
+    def test_margin_bracketed_at_780(self):
+        for offset, sent in ((770, "k-env"), (790, "k-login")):
+            with self.subTest(offset=offset):
+                write_login(self.tmp, [("k-login", iso(offset))])
+                srv = self.stub(self.success)
+                result, _, _ = self.run_gen(srv, {"XAI_API_KEY": "k-env"})
+                self.assertIsNotNone(result)
+                self.assertEqual(srv.requests[0][2]["Authorization"], f"Bearer {sent}")
 
 
 class CliContractTests(unittest.TestCase):

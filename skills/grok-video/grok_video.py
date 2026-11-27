@@ -333,15 +333,19 @@ def generate_video(prompt, model="grok-imagine-video-1.5", duration=8,
             print(f"  progress: {progress}%")
 
         if status == "done":
-            video_url = (result.get("video") or {}).get("url")
+            video = result.get("video")
+            video_url = video.get("url") if isinstance(video, dict) else None
             if not video_url:
                 print(f"ERROR: done but no video url: "
                       f"{_redact(json.dumps(result), key)[:400]}", file=sys.stderr)
                 return None
             break
         if status == "failed":
-            err = result.get("error") or {}
-            code, message = err.get("code", "?"), err.get("message", "?")
+            err = result.get("error")
+            if isinstance(err, dict):
+                code, message = err.get("code", "?"), err.get("message", "?")
+            else:
+                code, message = "?", err or "?"
             print(f"ERROR: generation failed: {_redact(f'{code}: {message}', key)[:400]}",
                   file=sys.stderr)
             return None

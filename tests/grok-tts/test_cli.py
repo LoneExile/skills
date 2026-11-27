@@ -272,6 +272,15 @@ class CliTests(unittest.TestCase):
         self.assertTrue(a.is_file())
         self.assertTrue(j.is_file())
 
+    def test_relative_output_names_in_the_working_folder(self):
+        self.addCleanup(os.chdir, os.getcwd())
+        os.chdir(self.out)
+        code, _, e, reqs = self.run_cli(
+            ["Hi there", "-o", "a.wav", "--words", "a.json"], [tts_ok()])
+        self.assertEqual((code, len(reqs)), (0, 1), e)
+        self.assertTrue((self.out / "a.wav").is_file())
+        self.assertTrue((self.out / "a.json").is_file())
+
     def test_unusable_output_folder_fails_before_any_request(self):
         blocker = self.out / "blocker"
         blocker.write_text("not a folder")

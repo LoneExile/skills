@@ -17,7 +17,7 @@ Whenever the user asks to generate / create a video, short clip, or animated sce
 
 ## Key setup
 
-Run the script and let it find the credential itself. It checks, in order, and the first source that works wins:
+Run the script and let it find the credential itself. It checks, in order, and the first source that has a credential wins (a rejected one is not followed by the next source):
 
 1. the `grok` CLI login in `~/.grok/auth.json`, if it stays valid for the whole run (see the minimum lifetime below)
 2. environment `XAI_API_KEY`

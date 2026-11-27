@@ -1,0 +1,10 @@
+{
+ "bad_key": [
+  400,
+  "{\"code\":\"Client specified an invalid argument\",\"error\":\"Incorrect API key provided. You can obtain an API key from https://console.x.ai.\"}"
+ ],
+ "expired_oauth": [
+  403,
+  "{\"code\":\"The caller does not have permission to execute the specified operation\",\"error\":\"The OAuth2 access token could not be validated. [WKE=unauthenticated:bad-credentials]\"}"
+ ]
+}

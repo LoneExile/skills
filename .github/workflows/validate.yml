@@ -40,6 +40,25 @@ jobs:
             echo "No Python helper scripts to check."
           fi
 
+      - name: Check the shared code blocks are identical
+        run: |
+          set -euo pipefail
+          block() { sed -n "/^# --- $1 (keep identical/,/^# --- end $1 ---\$/p" "$2"; }
+          for name in "key lookup" "request safety"; do
+            img=$(block "$name" skills/grok-image/grok_image.py)
+            vid=$(block "$name" skills/grok-video/grok_video.py)
+            if [ -z "$img" ] || [ -z "$vid" ]; then
+              echo "::error::the '$name' block is missing from grok_image.py or grok_video.py"
+              exit 1
+            fi
+            if [ "$img" != "$vid" ]; then
+              echo "::error::the '$name' block differs between grok_image.py and grok_video.py"
+              diff <(printf '%s\n' "$img") <(printf '%s\n' "$vid") || true
+              exit 1
+            fi
+          done
+          echo "Shared code blocks are identical."
+
       - name: Run helper-script tests
         run: |
           shopt -s nullglob

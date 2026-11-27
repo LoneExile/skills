@@ -15,22 +15,46 @@ rules:
 
 # Exact fingerprints for stable code findings.
 fingerprints:
-- hash: sha256:ca3c317dd119d3bf
+- hash: sha256:a6e3204c738eb5f8
   rule_id: E1
   file: grok-image/SKILL.md
   reason: "Intended: docs mention the xAI Imagine endpoint (api.x.ai) the skill posts to — its core purpose."
-- hash: sha256:34daa15389519e67
+- hash: sha256:6a5db6cf65f52d2c
   rule_id: E1
   file: grok-image/grok_image.py
-  reason: "Intended: POSTs the prompt to https://api.x.ai/v1/images/generations to generate the image (core purpose)."
-- hash: sha256:aab2df12875e3799
+  reason: "Intended: the API_URL constant, https://api.x.ai/v1/images/generations, where the prompt is POSTed to generate the image (core purpose)."
+- hash: sha256:97275a11df900128
   rule_id: PE3
   file: grok-image/grok_image.py
-  reason: "Intended: reads the xAI OAuth token from the grok CLI store (~/.grok/auth.json); no secret is written or exfiltrated."
-- hash: sha256:ca0ef056bd93c2a2
+  reason: "Intended: reads the xAI credential from the grok CLI login store (~/.grok/auth.json) or ~/.omp/.env; it is sent only to api.x.ai in the Authorization header and is never printed, logged or written."
+- hash: sha256:70487106bb26c5c6
   rule_id: PE3
   file: grok-image/grok_image.py
-  reason: "Intended: reads the xAI OAuth token from the grok CLI store (~/.grok/auth.json); no secret is written or exfiltrated."
+  reason: "Intended: reads the xAI credential from the grok CLI login store (~/.grok/auth.json) or ~/.omp/.env; it is sent only to api.x.ai in the Authorization header and is never printed, logged or written."
+- hash: sha256:b6ad5374bbf5d424
+  rule_id: E1
+  file: grok-video/SKILL.md
+  reason: "Intended: docs mention the xAI Imagine video endpoint (api.x.ai) the skill posts to and polls — its core purpose."
+- hash: sha256:c52f2bca582710e8
+  rule_id: E1
+  file: grok-video/SKILL.md
+  reason: "Intended: docs mention the xAI Imagine video endpoint (api.x.ai) the skill posts to and polls — its core purpose."
+- hash: sha256:df33187808c86dbe
+  rule_id: E1
+  file: grok-video/grok_video.py
+  reason: "Intended: the API URL constants for https://api.x.ai/v1/videos/generations and its polling endpoint (core purpose)."
+- hash: sha256:993b594699e7047f
+  rule_id: E1
+  file: grok-video/grok_video.py
+  reason: "Intended: the API URL constants for https://api.x.ai/v1/videos/generations and its polling endpoint (core purpose)."
+- hash: sha256:028066a47b2a12b7
+  rule_id: PE3
+  file: grok-video/grok_video.py
+  reason: "Intended: reads the xAI credential from the grok CLI login store (~/.grok/auth.json) or ~/.omp/.env; it is sent only to api.x.ai in the Authorization header and is never printed, logged or written."
+- hash: sha256:f50c04432d8605ab
+  rule_id: PE3
+  file: grok-video/grok_video.py
+  reason: "Intended: reads the xAI credential from the grok CLI login store (~/.grok/auth.json) or ~/.omp/.env; it is sent only to api.x.ai in the Authorization header and is never printed, logged or written."
 - hash: sha256:10ab5e05b47c3b01
   rule_id: PE3
   file: highlighted-source-reference-cards/refcards.mjs

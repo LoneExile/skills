@@ -111,7 +111,7 @@ class GenerateImageTests(unittest.TestCase):
         self.assertNotIn("k\nbad", stderr)
 
     def test_redirect_not_followed(self):
-        srv = self.stub([(302, {"Location": "/elsewhere"}, b"{}")])
+        srv = self.stub(lambda srv: [(302, {"Location": srv.url + "/elsewhere"}, b"{}")])
         result, stderr = self.run_gen(srv, {"XAI_API_KEY": "k-env"})
         self.assertIsNone(result)
         self.assertEqual(len(srv.requests), 1)
@@ -124,6 +124,64 @@ class GenerateImageTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertIn("Note: the grok CLI login expires at", stderr)
         self.assertLess(stderr.index("Note:"), stderr.index("Key:"))
+
+    def test_unexpected_response_redacted(self):
+        key = "K-SECRET-0123456789"
+        srv = self.stub([(200, {}, json.dumps("x" * 380 + key).encode())])
+        result, stderr = self.run_gen(srv, {"XAI_API_KEY": key})
+        self.assertIsNone(result)
+        self.assertIn("unexpected API response", stderr)
+        self.assertIn("[redacted]", stderr)
+        self.assertNotIn("K-SECRET", stderr)
+        self.assertNotIn("0123456789", stderr)
+
+    def test_unwritable_output_stops_before_request(self):
+        (self.tmp / "afile").write_text("x")
+        self.out = self.tmp / "afile" / "img.jpg"
+        srv = self.stub(self.success)
+        result, stderr = self.run_gen(srv, {"XAI_API_KEY": "k-env"})
+        self.assertIsNone(result)
+        self.assertEqual(len(srv.requests), 0)
+        self.assertIn("ERROR: cannot write the output:", stderr)
+
+    def test_other_400_is_not_a_rejection(self):
+        srv = self.stub([(400, {}, b'{"error":"Argument not supported: size"}')])
+        result, stderr = self.run_gen(srv, {"XAI_API_KEY": "k-env"})
+        self.assertIsNone(result)
+        self.assertEqual(len(srv.requests), 1)
+        self.assertIn("ERROR: xAI API HTTP 400", stderr)
+        self.assertNotIn("was rejected", stderr)
+        self.assertNotIn("HINT:", stderr)
+
+    def test_401_is_a_rejection(self):
+        srv = self.stub([(401, {}, b'{"error":"unauthorized"}')])
+        result, stderr = self.run_gen(srv, {"XAI_API_KEY": "k-env"})
+        self.assertIsNone(result)
+        self.assertEqual(len(srv.requests), 1)
+        self.assertIn(
+            "the key from XAI_API_KEY (environment) was rejected (HTTP 401)", stderr)
+        self.assertIn("HINT: Check the key at https://console.x.ai.", stderr)
+
+    def test_default_now_is_timezone_aware(self):
+        write_login(self.tmp, [("k-old", "2020-01-01T00:00:00Z")])
+        srv = self.stub(self.success)
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            result = grok_image.generate_image(
+                "a cat", out=self.out, env={"XAI_API_KEY": "k-env"}, home=self.tmp,
+                api_url=srv.url + "/v1/images/generations")
+        self.assertIsNotNone(result)
+        self.assertEqual(srv.requests[0][2]["Authorization"], "Bearer k-env")
+
+    def test_image_margin_is_timeout_plus_60(self):
+        write_login(self.tmp, [("k-login", iso(150))])
+        srv = self.stub(self.success)
+        result, stderr = self.run_gen(srv, {"XAI_API_KEY": "k-env"})
+        self.assertIsNotNone(result)
+        self.assertEqual(srv.requests[0][2]["Authorization"], "Bearer k-env")
+        self.assertIn(
+            f"Note: the grok CLI login expires at {iso(150)}, too soon for this run; "
+            "using XAI_API_KEY (environment).", stderr)
 
 
 class CliContractTests(unittest.TestCase):

@@ -223,6 +223,12 @@ def generate_image(prompt, model="grok-imagine-image", out=None, timeout=120,
         print(f"ERROR: the key from {label} is not a valid header value", file=sys.stderr)
         return None
 
+    try:
+        dest = _resolve_dest(out, prompt)
+    except (OSError, RuntimeError) as e:
+        print(f"ERROR: cannot write the output: {e}", file=sys.stderr)
+        return None
+
     payload = {"model": model, "prompt": prompt, "n": 1}
     req = urllib.request.Request(
         api_url,
@@ -250,16 +256,15 @@ def generate_image(prompt, model="grok-imagine-image", out=None, timeout=120,
     try:
         image_url = data["data"][0]["url"]
     except (KeyError, IndexError, TypeError):
-        print(f"ERROR: unexpected API response: {json.dumps(data)[:400]}", file=sys.stderr)
+        print(f"ERROR: unexpected API response: {_redact(json.dumps(data), key)[:400]}", file=sys.stderr)
         return None
 
-    dest = _resolve_dest(out, prompt)
     try:
         dl_req = urllib.request.Request(image_url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(dl_req, timeout=60) as r:
             dest.write_bytes(r.read())
     except Exception as e:  # noqa: BLE001
-        print(f"ERROR downloading image: {e}", file=sys.stderr)
+        print(f"ERROR downloading image: {_redact(str(e), key)}", file=sys.stderr)
         return None
 
     return str(dest.resolve())

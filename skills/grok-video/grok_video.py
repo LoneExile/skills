@@ -2,11 +2,12 @@
 """
 grok-video skill (OMP).
 
-Generate videos via the xAI Imagine video API using the xAI OAuth token from
-the `grok` CLI (~/.grok/auth.json). Stdlib-only (urllib) -- no `requests` and
-no `xai-...` console API key required.
+Generate videos via the xAI Imagine video API. The key is the xAI OAuth token
+from the `grok` CLI (~/.grok/auth.json) when it is valid long enough, else
+XAI_API_KEY / GROK_API_KEY from the environment or ~/.omp/.env. Stdlib-only
+(urllib) -- no `requests`.
 
-The token is read FRESH on every invocation, so refreshes performed by the
+The key is read FRESH on every invocation, so refreshes performed by the
 grok CLI are picked up automatically.
 
 Flow: POST /v1/videos/generations -> request_id -> poll GET /v1/videos/{id}
@@ -16,8 +17,10 @@ from __future__ import annotations
 
 import argparse
 import base64
+import http.client
 import json
 import mimetypes
+import os
 import re
 import sys
 import time
@@ -29,7 +32,6 @@ from typing import Mapping
 
 API_URL = "https://api.x.ai/v1/videos/generations"
 STATUS_URL = "https://api.x.ai/v1/videos/{request_id}"
-GROK_AUTH_JSON = Path.home() / ".grok" / "auth.json"
 DEFAULT_OUT = Path.home() / "generated-videos"
 VIDEO_EXT = ".mp4"
 ASPECT_RATIOS = ("1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3")
@@ -150,48 +152,51 @@ def resolve_key(env: Mapping[str, str], home: Path, now: datetime,
         "Run `grok` to log in, set XAI_API_KEY, or add it to ~/.omp/.env.")
 # --- end key lookup ---
 
+# --- request safety (keep identical in grok_image.py and grok_video.py) ---
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Never follow redirects: the Authorization header must stay on one host."""
 
-def _expired(iso):
-    """Best-effort: True if an ISO-8601 timestamp is in the past."""
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def _usable_header_value(key: str) -> bool:
     try:
-        return datetime.fromisoformat(iso.replace("Z", "+00:00")) <= datetime.now(timezone.utc)
-    except Exception:  # noqa: BLE001
+        key.encode("latin-1")
+    except UnicodeEncodeError:
         return False
+    return "\r" not in key and "\n" not in key
 
 
-def _token_from_grok_cli():
-    """xAI access token from the grok CLI store (~/.grok/auth.json).
+def _redact(text: str, key: str) -> str:
+    return text.replace(key, "[redacted]") if key else text
 
-    Entries are keyed by "<issuer>::<client_id>"; the access token is under "key".
-    Prefer an unexpired entry, else fall back to any entry with a token.
-    """
-    if not GROK_AUTH_JSON.exists():
-        return None
+
+def _error_text(raw: bytes, key: str) -> str:
+    return _redact(raw.decode("utf-8", errors="replace"), key)[:400]
+
+
+def _rejected(status: int, raw: bytes) -> bool:
+    if status in (401, 403):
+        return True
+    return status == 400 and "api key" in raw.decode("utf-8", errors="replace").lower()
+
+
+def _hint(label: str) -> str:
+    if label == LOGIN_LABEL:
+        return ("HINT: Run `grok` to log in again, or move ~/.grok/auth.json aside "
+                "to use your API key.")
+    return "HINT: Check the key at https://console.x.ai."
+
+
+def _read_error(e: urllib.error.HTTPError) -> bytes:
     try:
-        data = json.loads(GROK_AUTH_JSON.read_text())
-    except Exception:  # noqa: BLE001
-        return None
-    fallback = None
-    for entry in (data.values() if isinstance(data, dict) else []):
-        if isinstance(entry, dict) and entry.get("key"):
-            exp = entry.get("expires_at")
-            if not exp or not _expired(exp):
-                return entry["key"]
-            fallback = fallback or entry["key"]
-    return fallback
-
-
-def load_xai_token():
-    """Load the xAI OAuth token from the grok CLI store (~/.grok/auth.json), fresh each call."""
-    tok = _token_from_grok_cli()
-    if tok:
-        return tok
-    print(
-        "ERROR: no xAI OAuth token found in ~/.grok/auth.json.\n"
-        "       Log in with the grok CLI (run `grok`), then retry.",
-        file=sys.stderr,
-    )
-    return None
+        return e.read()
+    except (OSError, http.client.HTTPException, ValueError):
+        return b""
+    finally:
+        e.close()
+# --- end request safety ---
 
 
 def _request(url, token=None, payload=None, method=None, timeout=120):
@@ -205,7 +210,7 @@ def _request(url, token=None, payload=None, method=None, timeout=120):
     if token:
         headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    with urllib.request.build_opener(_NoRedirect).open(req, timeout=timeout) as r:
         body = r.read().decode()
         return json.loads(body) if body else None
 
@@ -238,10 +243,23 @@ def _resolve_dest(out, prompt):
 
 def generate_video(prompt, model="grok-imagine-video-1.5", duration=8,
                    aspect_ratio="16:9", resolution="720p", image=None,
-                   out=None, timeout=120, poll_interval=5, max_wait=600):
+                   out=None, timeout=120, poll_interval=5, max_wait=600,
+                   *, env=None, home=None, now=None, api_url=API_URL,
+                   status_url=STATUS_URL, sleep=time.sleep):
     """Generate a video; return the absolute saved path, or None on failure."""
-    token = load_xai_token()
-    if not token:
+    env = os.environ if env is None else env
+    home = Path.home() if home is None else home
+    now = datetime.now(timezone.utc) if now is None else now
+    try:
+        key, label, note = resolve_key(env, home, now, max_wait + timeout + 60)
+    except KeyMissingError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return None
+    if note:
+        print(note, file=sys.stderr)
+    print(f"Key: {label}", file=sys.stderr)
+    if not _usable_header_value(key):
+        print(f"ERROR: the key from {label} is not a valid header value", file=sys.stderr)
         return None
 
     payload = {
@@ -257,44 +275,59 @@ def generate_video(prompt, model="grok-imagine-video-1.5", duration=8,
         try:
             payload["image"] = {"url": _image_data_url(image)}
         except Exception as e:  # noqa: BLE001
-            print(f"ERROR: {e}", file=sys.stderr)
+            print(f"ERROR: {_redact(str(e), key)[:400]}", file=sys.stderr)
             return None
 
     try:
-        data = _request(API_URL, token=token, payload=payload, timeout=timeout)
+        dest = _resolve_dest(out, prompt)
+    except (OSError, RuntimeError) as e:
+        print(f"ERROR: cannot write the output: {e}", file=sys.stderr)
+        return None
+
+    try:
+        data = _request(api_url, token=key, payload=payload, timeout=timeout)
     except urllib.error.HTTPError as e:
-        detail = e.read().decode(errors="replace")[:400]
-        print(f"ERROR: xAI API HTTP {e.code}: {detail}", file=sys.stderr)
-        if e.code in (400, 401, 403) and "api key" in detail.lower():
-            print("HINT: the OAuth token is missing/expired -- refresh the grok CLI (run `grok`) and retry.",
+        raw = _read_error(e)
+        text = _error_text(raw, key)
+        if _rejected(e.code, raw):
+            print(f"ERROR: the key from {label} was rejected (HTTP {e.code}): {text}",
                   file=sys.stderr)
+            print(_hint(label), file=sys.stderr)
+        else:
+            print(f"ERROR: xAI API HTTP {e.code}: {text}", file=sys.stderr)
         return None
     except Exception as e:  # noqa: BLE001
-        print(f"ERROR calling xAI API: {e}", file=sys.stderr)
+        print(f"ERROR calling xAI API: {_redact(str(e), key)}", file=sys.stderr)
         return None
 
     request_id = data.get("request_id") if isinstance(data, dict) else None
     if not request_id:
-        print(f"ERROR: unexpected API response: {json.dumps(data)[:400]}", file=sys.stderr)
+        print(f"ERROR: unexpected API response: {_redact(json.dumps(data), key)[:400]}",
+              file=sys.stderr)
         return None
     print(f"Submitted generation request {request_id} (this can take a minute)...")
 
-    url = STATUS_URL.format(request_id=request_id)
+    url = status_url.format(request_id=request_id)
     last_progress = -1
     waited = 0
     while waited < max_wait:
         try:
-            result = _request(url, token=token, timeout=timeout)
+            result = _request(url, token=key, timeout=timeout)
         except urllib.error.HTTPError as e:
-            detail = e.read().decode(errors="replace")[:400]
-            print(f"ERROR: poll HTTP {e.code}: {detail}", file=sys.stderr)
+            raw = _read_error(e)
+            if _rejected(e.code, raw):
+                print(f"ERROR: the key from {label} was rejected (HTTP {e.code}): "
+                      f"{_error_text(raw, key)}", file=sys.stderr)
+                print(_hint(label), file=sys.stderr)
+            else:
+                print(f"ERROR: poll HTTP {e.code}: {_error_text(raw, key)}", file=sys.stderr)
             return None
         except Exception as e:  # noqa: BLE001
-            print(f"ERROR polling: {e}", file=sys.stderr)
+            print(f"ERROR polling: {_redact(str(e), key)}", file=sys.stderr)
             return None
 
         status = result.get("status") if isinstance(result, dict) else None
-        progress = result.get("progress")
+        progress = result.get("progress") if isinstance(result, dict) else None
         if isinstance(progress, int) and progress != last_progress:
             last_progress = progress
             print(f"  progress: {progress}%")
@@ -302,31 +335,33 @@ def generate_video(prompt, model="grok-imagine-video-1.5", duration=8,
         if status == "done":
             video_url = (result.get("video") or {}).get("url")
             if not video_url:
-                print(f"ERROR: done but no video url: {json.dumps(result)[:400]}", file=sys.stderr)
+                print(f"ERROR: done but no video url: "
+                      f"{_redact(json.dumps(result), key)[:400]}", file=sys.stderr)
                 return None
             break
         if status == "failed":
             err = result.get("error") or {}
-            print(f"ERROR: generation failed: {err.get('code', '?')}: {err.get('message', '?')}",
+            code, message = err.get("code", "?"), err.get("message", "?")
+            print(f"ERROR: generation failed: {_redact(f'{code}: {message}', key)[:400]}",
                   file=sys.stderr)
             return None
         if status not in ("pending", "processing", None):
-            print(f"ERROR: unexpected status {status!r}: {json.dumps(result)[:400]}", file=sys.stderr)
+            print(f"ERROR: unexpected status {_redact(repr(status), key)}: "
+                  f"{_redact(json.dumps(result), key)[:400]}", file=sys.stderr)
             return None
 
-        time.sleep(poll_interval)
+        sleep(poll_interval)
         waited += poll_interval
     else:
         print(f"ERROR: timed out after {max_wait}s waiting for generation.", file=sys.stderr)
         return None
 
-    dest = _resolve_dest(out, prompt)
     try:
         dl_req = urllib.request.Request(video_url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(dl_req, timeout=timeout) as r:
             dest.write_bytes(r.read())
     except Exception as e:  # noqa: BLE001
-        print(f"ERROR downloading video: {e}", file=sys.stderr)
+        print(f"ERROR downloading video: {_redact(str(e), key)[:400]}", file=sys.stderr)
         return None
 
     return str(dest.resolve())

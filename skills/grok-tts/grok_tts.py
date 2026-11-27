@@ -28,7 +28,7 @@ import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 class GrokTTSError(Exception):
@@ -626,6 +626,81 @@ def _read_text(arg: str) -> str:
     return Path(arg).read_text(encoding="utf-8-sig") if is_file else arg
 
 
+def _load_script(script: Path) -> list:
+    try:
+        data = json.loads(script.read_text(encoding="utf-8-sig"))
+    except OSError as exc:
+        raise UsageError(f"cannot read the lines file {script}: {exc.strerror or exc}") from None
+    except ValueError as exc:
+        raise UsageError(f"the lines file {script} is not valid JSON: {exc}") from None
+    if not isinstance(data, list) or not data:
+        raise UsageError("the lines file must be a non-empty JSON list")
+    for i, item in enumerate(data):
+        if (not isinstance(item, dict) or not isinstance(item.get("id"), str)
+                or not isinstance(item.get("text"), str)):
+            raise UsageError(
+                f"line {i + 1} must be an object with a string \"id\" and a string \"text\"")
+    return data
+
+
+def _check_line_id(line_id: str) -> None:
+    if (not line_id or line_id in (".", "..")
+            or any(c in line_id for c in "/\\:")):
+        raise UsageError(
+            f"line id {line_id!r} is not a plain file name "
+            "(not empty, not . or .., no / \\ or :)")
+
+
+def run_batch(script: Path, out_dir: Path, project: Path, *, voice: str,
+              lang: str, speed: float, normalize: bool, cache_dir: Path,
+              use_cache: bool, key_provider: Callable[[], tuple],
+              api_base: str = API_BASE, timeout: float = 300,
+              sleep=time.sleep, rand=random.random) -> Path:
+    """Speak every line of `script`; write `lines.json`; return its path."""
+    data = _load_script(script)
+    seen = set()
+    texts = []
+    for item in data:
+        line_id = item["id"]
+        _check_line_id(line_id)
+        if line_id in seen:
+            raise UsageError(f"line id {line_id!r} is used twice")
+        seen.add(line_id)
+        text = item["text"].strip()
+        try:
+            warning = validate_request(text, lang, speed)
+        except UsageError as exc:
+            raise UsageError(f"line {line_id!r}: {exc}") from None
+        if warning:
+            print(f"WARNING: {warning}", file=sys.stderr)
+        texts.append(text)
+    project_abs = project.resolve()
+    out_abs = out_dir.resolve()
+    try:
+        rel = PurePosixPath(out_abs.relative_to(project_abs).as_posix())
+    except ValueError:
+        raise UsageError(
+            f"--out-dir {out_dir} is outside the project folder {project}") from None
+    out_abs.mkdir(parents=True, exist_ok=True)
+    lines = []
+    for item, text in zip(data, texts):
+        line_id = item["id"]
+        wav = out_abs / f"{line_id}.wav"
+        words, cached = produce(
+            text, wav, out_abs / f"{line_id}.words.json", voice=voice, lang=lang,
+            speed=speed, normalize=normalize, cache_dir=cache_dir,
+            use_cache=use_cache, key_provider=key_provider, api_base=api_base,
+            timeout=timeout, ffprobe=None, sleep=sleep, rand=rand)
+        print(f"{line_id}: {wav}" + (" (cached)" if cached else ""))
+        lines.append({"id": line_id, "audio": str(rel / f"{line_id}.wav"),
+                      "words": words})
+    lines_path = out_abs / "lines.json"
+    atomic_write_many([(lines_path, json.dumps(
+        lines, indent=1, ensure_ascii=False).encode("utf-8"))])
+    print(f"Lines saved to: {lines_path}")
+    return lines_path
+
+
 def _run(args, *, api_base, env, home, now, sleep, rand) -> int:
     key_provider = lambda: resolve_key(env, home, now)  # noqa: E731
     if args.list:
@@ -639,7 +714,15 @@ def _run(args, *, api_base, env, home, now, sleep, rand) -> int:
     if args.lines is not None:
         if args.text or args.out or args.words:
             raise UsageError("--lines cannot be combined with text, -o or --words")
-        raise UsageError("--lines batch mode is not available yet")
+        project = Path(args.project)
+        out_dir = Path(args.out_dir)
+        run_batch(
+            Path(args.lines), out_dir if out_dir.is_absolute() else project / out_dir,
+            project, voice=args.voice, lang=args.lang, speed=args.speed,
+            normalize=args.normalize, cache_dir=default_cache_dir(env, home),
+            use_cache=not args.no_cache, key_provider=key_provider,
+            api_base=api_base, timeout=args.timeout, sleep=sleep, rand=rand)
+        return 0
     if not args.text or not args.out:
         raise UsageError("give the text and -o OUT.wav, or use --lines or --list")
     dest = Path(args.out)

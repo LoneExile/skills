@@ -56,7 +56,8 @@ class StubServer:
                             500, {}, b'{"error":"stub exhausted"}')
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(payload)))
+                if "Content-Length" not in headers:
+                    self.send_header("Content-Length", str(len(payload)))
                 for name, value in headers.items():
                     self.send_header(name, value)
                 self.end_headers()

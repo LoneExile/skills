@@ -135,6 +135,74 @@ class ApiTests(unittest.TestCase):
                 self.assertIsNone(exc.__context__)
                 self.assertEqual(srv.requests, [])
 
+    def test_truncated_body_is_retried_as_unreachable(self):
+        for status in (200, 503):
+            with self.subTest(status=status):
+                sleeps = []
+                short = (status, {"Content-Length": "1000"}, b'{"audio"')
+                with StubServer([short] * 4) as srv:
+                    with self.assertRaises(grok_tts.ApiError) as cm:
+                        call(srv, sleeps, rand=lambda: 0)
+                self.assertIn("could not reach", str(cm.exception))
+                self.assertEqual(sleeps, [2, 4, 8])
+                self.assertEqual(len(srv.requests), 4)
+
+    def _assert_key_hidden(self, exc):
+        self.assertNotIn(KEY, str(exc))
+        self.assertNotIn(KEY, repr(exc))
+        self.assertIn("[redacted]", str(exc))
+        self.assertIsNone(exc.__cause__)
+        self.assertIsNone(exc.__context__)
+
+    def test_echoed_key_is_redacted_400(self):
+        body = json.dumps({"error": f"Incorrect API key provided: {KEY}"}).encode()
+        with StubServer([(400, {}, body)]) as srv:
+            with self.assertRaises(grok_tts.ApiError) as cm:
+                call(srv)
+        self._assert_key_hidden(cm.exception)
+
+    def test_echoed_key_is_redacted_503(self):
+        body = json.dumps({"error": f"busy for {KEY}"}).encode()
+        with StubServer([(503, {}, body)] * 4) as srv:
+            with self.assertRaises(grok_tts.ApiError) as cm:
+                call(srv, rand=lambda: 0)
+        self._assert_key_hidden(cm.exception)
+
+    def test_transport_reason_is_redacted(self):
+        import urllib.error
+        import urllib.request
+        orig = urllib.request.OpenerDirector.open
+
+        def boom(self, *a, **k):
+            raise urllib.error.URLError(f"boom {KEY}")
+
+        urllib.request.OpenerDirector.open = boom
+        try:
+            with StubServer([]) as srv:
+                with self.assertRaises(grok_tts.ApiError) as cm:
+                    call(srv, rand=lambda: 0)
+        finally:
+            urllib.request.OpenerDirector.open = orig
+        self.assertIn("could not reach", str(cm.exception))
+        self._assert_key_hidden(cm.exception)
+
+    def test_send_time_bad_header_is_static_error(self):
+        orig = grok_tts._usable_header_value
+        grok_tts._usable_header_value = lambda key: True
+        try:
+            with StubServer([tts_ok()]) as srv:
+                with self.assertRaises(grok_tts.ApiError) as cm:
+                    call(srv, key="secret-zz\nX: 1")
+        finally:
+            grok_tts._usable_header_value = orig
+        exc = cm.exception
+        self.assertNotIn("secret-zz", str(exc))
+        self.assertNotIn("secret-zz", repr(exc))
+        self.assertIn(SRC, str(exc))
+        self.assertIsNone(exc.__cause__)
+        self.assertTrue(exc.__suppress_context__)
+        self.assertEqual(srv.requests, [])
+
     def test_redirect_is_not_followed(self):
         with StubServer([(302, {"Location": "http://127.0.0.1:1/x"}, b"")]) as srv:
             with self.assertRaises(grok_tts.ApiError) as cm:

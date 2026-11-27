@@ -9,6 +9,7 @@ This module has no side effects at import time: no network, no file access.
 """
 import base64
 import binascii
+import http.client
 import json
 import math
 import os
@@ -402,25 +403,30 @@ def request_json(method: str, path: str, *, key: str, source: str,
         retry_after = None
         reason = None
         bad_header = False
+        resp = None
         try:
-            with opener.open(req, timeout=timeout) as resp:
-                status = resp.status
-                raw = resp.read()
+            resp = opener.open(req, timeout=timeout)
         except urllib.error.HTTPError as e:
-            status = e.code
-            retry_after = e.headers.get("Retry-After") if e.headers else None
-            try:
-                raw = e.read()
-            except (OSError, ValueError):
-                raw = b""
+            resp = e
         except (ValueError, UnicodeError):
             bad_header = True
-        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+        except (urllib.error.URLError, http.client.HTTPException, OSError) as e:
             reason = getattr(e, "reason", None) or e
-            reason = str(reason).replace(key, "[redacted]") if key else str(reason)
         if bad_header:
             # Raised outside the except block so no exception is chained to it.
             raise ApiError(f"the key from {source} is not a valid header value") from None
+        if resp is not None:
+            try:
+                with resp:
+                    raw = resp.read()
+                status = resp.status
+                if isinstance(resp, urllib.error.HTTPError):
+                    retry_after = resp.headers.get("Retry-After") if resp.headers else None
+            except (http.client.HTTPException, OSError, ValueError) as e:
+                status = None
+                reason = getattr(e, "reason", None) or e
+        if reason is not None:
+            reason = str(reason).replace(key, "[redacted]") if key else str(reason)
         if status is None:
             if attempt < attempts - 1:
                 sleep(_retry_wait(attempt, None, rand))
